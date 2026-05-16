@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alertsify-scraper"
+version = "0.1.0"
+description = "Poll Alertsify option positions and mirror new legs to Tradier with Turso dedupe and ntfy alerts."
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.27",
+  "pydantic>=2",
+  "pydantic-settings>=2",
+  "libsql>=0.1.11",
+]
+
+[project.scripts]
+alertsify-scraper = "alertsify_scraper.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
