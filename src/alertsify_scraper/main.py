@@ -4,13 +4,15 @@ import asyncio
 import logging
 import signal
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from functools import partial
 from typing import Any, TypeVar
+from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic import ValidationError
 
-from alertsify_scraper import alertsify, db, ntfy, tradier
+from alertsify_scraper import alertsify, db, market_hours, ntfy, tradier
 from alertsify_scraper.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,23 @@ def configure_logging() -> None:
 
 async def _run_in_thread(fn: Callable[[], T]) -> T:
     return await asyncio.to_thread(fn)
+
+
+async def _sleep_until_or_stop(
+    stop: asyncio.Event,
+    seconds: float,
+    *,
+    max_chunk_s: float = 300.0,
+) -> bool:
+    remaining = seconds
+    while remaining > 0 and not stop.is_set():
+        chunk = min(remaining, max_chunk_s)
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=chunk)
+            return True
+        except asyncio.TimeoutError:
+            remaining -= chunk
+    return stop.is_set()
 
 
 async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
@@ -144,6 +163,36 @@ async def async_main() -> None:
     timeout = httpx.Timeout(60.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         while not stop.is_set():
+            if settings.poll_market_hours_only:
+                now = datetime.now(ZoneInfo(settings.market_timezone))
+                if not market_hours.is_us_weekday_session(
+                    now,
+                    tz_name=settings.market_timezone,
+                    market_open=settings.market_open,
+                    market_close=settings.market_close,
+                ):
+                    wait_s = market_hours.seconds_until_next_market_open(
+                        now,
+                        tz_name=settings.market_timezone,
+                        market_open=settings.market_open,
+                        market_close=settings.market_close,
+                    )
+                    eta = (now + timedelta(seconds=wait_s)).astimezone(
+                        ZoneInfo(settings.market_timezone),
+                    )
+                    logger.info(
+                        "Outside market session (%s %s-%s local); sleeping %.0fs "
+                        "(next session start ~%s)",
+                        settings.market_timezone,
+                        settings.market_open.strftime("%H:%M"),
+                        settings.market_close.strftime("%H:%M"),
+                        wait_s,
+                        eta.strftime("%Y-%m-%d %H:%M %Z"),
+                    )
+                    if await _sleep_until_or_stop(stop, wait_s):
+                        break
+                    continue
+
             try:
                 await run_poll_cycle(client, settings)
             except Exception:

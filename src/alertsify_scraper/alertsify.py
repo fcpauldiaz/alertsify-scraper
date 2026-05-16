@@ -10,6 +10,20 @@ from alertsify_scraper.config import Settings
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_ALERTSIFY_USER_AGENT = "curl/8.7.1"
+
+
+def _alertsify_headers(settings: Settings) -> dict[str, str]:
+    headers: dict[str, str] = {
+        "Accept": "*/*",
+        "User-Agent": settings.alertsify_user_agent or _DEFAULT_ALERTSIFY_USER_AGENT,
+    }
+    if settings.alertsify_authorization:
+        headers["Authorization"] = settings.alertsify_authorization
+    if settings.alertsify_cookie:
+        headers["Cookie"] = settings.alertsify_cookie
+    return headers
+
 
 class OptionPosition(BaseModel):
     id: str
@@ -43,22 +57,20 @@ async def fetch_option_positions(
     settings: Settings,
 ) -> OptionPositionsResponse:
     url = _positions_url(settings)
-    headers: dict[str, str] = {}
-    if settings.alertsify_authorization:
-        headers["Authorization"] = settings.alertsify_authorization
-    if settings.alertsify_cookie:
-        headers["Cookie"] = settings.alertsify_cookie
+    headers = _alertsify_headers(settings)
 
+    cookie_len = len(settings.alertsify_cookie) if settings.alertsify_cookie else 0
     logger.info(
-        "Fetching Alertsify positions from %s (auth=%s cookie=%s)",
+        "Fetching Alertsify positions from %s (auth=%s cookie_len=%d follow_redirects=True)",
         url,
         bool(settings.alertsify_authorization),
-        bool(settings.alertsify_cookie),
+        cookie_len,
     )
     response = await client.get(
         url,
         params={"userId": settings.alertsify_user_id},
         headers=headers,
+        follow_redirects=True,
     )
     response.raise_for_status()
     payload: dict[str, Any] = response.json()
