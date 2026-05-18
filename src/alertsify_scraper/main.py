@@ -88,6 +88,23 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
             trade.tradier_option_symbol,
         )
         preview = settings.tradier_preview_only
+        try:
+            await ntfy.notify_trade_closing(
+                client,
+                settings,
+                alertsify_user_id=user_id,
+                alertsify_position_id=trade.alertsify_position_id,
+                alertsify_symbol=trade.alertsify_symbol,
+                tradier_option_symbol=trade.tradier_option_symbol,
+                quantity=trade.quantity,
+                preview=preview,
+            )
+        except Exception:
+            logger.exception(
+                "ntfy failed before close user_id=%s alertsify_id=%s",
+                user_id,
+                trade.alertsify_position_id,
+            )
         logger.info(
             "Closing Tradier position user_id=%s alertsify_id=%s option_symbol=%s",
             user_id,
@@ -104,7 +121,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
         )
         if preview:
             logger.info(
-                "Preview only enabled; skipping DB close and ntfy "
+                "Preview only enabled; skipping DB close "
                 "(user_id=%s alertsify_id=%s close_order_id=%s)",
                 user_id,
                 trade.alertsify_position_id,
@@ -120,23 +137,6 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                 tradier_close_order_id=close_order_id,
             ),
         )
-        try:
-            await ntfy.notify_trade_closed(
-                client,
-                settings,
-                alertsify_user_id=user_id,
-                alertsify_position_id=trade.alertsify_position_id,
-                alertsify_symbol=trade.alertsify_symbol,
-                tradier_option_symbol=trade.tradier_option_symbol,
-                tradier_close_order_id=close_order_id,
-                quantity=trade.quantity,
-            )
-        except Exception:
-            logger.exception(
-                "ntfy failed after close user_id=%s alertsify_id=%s",
-                user_id,
-                trade.alertsify_position_id,
-            )
         closed += 1
 
     for user_id, parsed in user_results:
@@ -183,6 +183,21 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                 )
 
                 preview = settings.tradier_preview_only
+                try:
+                    await ntfy.notify_trade_placing(
+                        client,
+                        settings,
+                        alertsify_user_id=user_id,
+                        position=pos,
+                        tradier_option_symbol=option_symbol,
+                        preview=preview,
+                    )
+                except Exception:
+                    logger.exception(
+                        "ntfy failed before placement user_id=%s alertsify_id=%s",
+                        user_id,
+                        pos.id,
+                    )
                 order_id = await tradier.place_option_order(
                     client,
                     settings,
@@ -193,7 +208,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                 )
                 if preview:
                     logger.info(
-                        "Preview only enabled; skipping DB persist and ntfy "
+                        "Preview only enabled; skipping DB persist "
                         "(user_id=%s alertsify_id=%s tradier_order_id=%s)",
                         user_id,
                         pos.id,
@@ -214,21 +229,6 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         quantity=pos.quantity,
                     ),
                 )
-                try:
-                    await ntfy.notify_trade_placed(
-                        client,
-                        settings,
-                        alertsify_user_id=user_id,
-                        position=pos,
-                        tradier_option_symbol=option_symbol,
-                        tradier_order_id=order_id,
-                    )
-                except Exception:
-                    logger.exception(
-                        "ntfy failed after successful placement user_id=%s alertsify_id=%s",
-                        user_id,
-                        pos.id,
-                    )
                 placed += 1
             except Exception:
                 errors += 1
