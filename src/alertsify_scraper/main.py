@@ -13,6 +13,7 @@ import httpx
 from pydantic import ValidationError
 
 from alertsify_scraper import alertsify, db, market_hours, ntfy, tradier
+from alertsify_scraper.db import OpenTrade
 from alertsify_scraper.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -50,8 +51,12 @@ async def _sleep_until_or_stop(
 
 
 async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
-    logger.info("Poll cycle started")
-    parsed = await alertsify.fetch_option_positions(client, settings)
+    logger.info(
+        "Poll cycle started for %d Alertsify user(s)",
+        len(settings.alertsify_user_ids),
+    )
+    user_results = await alertsify.fetch_all_option_positions(client, settings)
+    user_fetch_errors = len(settings.alertsify_user_ids) - len(user_results)
     chain_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
     async def get_chain(under: str, exp: str) -> list[dict[str, Any]]:
@@ -72,79 +77,175 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
         return chain_cache[key]
 
     placed = 0
+    closed = 0
     skipped_dup = 0
     errors = 0
+    total_positions = 0
 
-    for pos in parsed.positions:
-        try:
-            if await _run_in_thread(partial(db.has_placed_sync, settings, pos.id)):
-                skipped_dup += 1
-                logger.info(
-                    "skip duplicate alertsify_position_id=%s symbol=%s",
-                    pos.id,
-                    pos.symbol,
-                )
-                continue
-
-            chain = await get_chain(pos.ticker, pos.expiration_date)
-            option_symbol = tradier.resolve_tradier_option_symbol(chain, pos)
+    async def close_trade(user_id: str, trade: OpenTrade) -> None:
+        nonlocal closed, errors
+        underlying = trade.underlying or tradier.underlying_from_option_symbol(
+            trade.tradier_option_symbol,
+        )
+        preview = settings.tradier_preview_only
+        logger.info(
+            "Closing Tradier position user_id=%s alertsify_id=%s option_symbol=%s",
+            user_id,
+            trade.alertsify_position_id,
+            trade.tradier_option_symbol,
+        )
+        close_order_id = await tradier.close_option_order(
+            client,
+            settings,
+            underlying=underlying,
+            option_symbol=trade.tradier_option_symbol,
+            quantity=trade.quantity,
+            preview=preview,
+        )
+        if preview:
             logger.info(
-                "Resolved Tradier option_symbol=%s for alertsify_id=%s",
-                option_symbol,
-                pos.id,
+                "Preview only enabled; skipping DB close and ntfy "
+                "(user_id=%s alertsify_id=%s close_order_id=%s)",
+                user_id,
+                trade.alertsify_position_id,
+                close_order_id,
             )
-
-            preview = settings.tradier_preview_only
-            order_id = await tradier.place_option_order(
+            return
+        await _run_in_thread(
+            partial(
+                db.mark_closed_sync,
+                settings,
+                alertsify_user_id=user_id,
+                alertsify_position_id=trade.alertsify_position_id,
+                tradier_close_order_id=close_order_id,
+            ),
+        )
+        try:
+            await ntfy.notify_trade_closed(
                 client,
                 settings,
-                underlying=pos.ticker,
-                option_symbol=option_symbol,
-                quantity=pos.quantity,
-                preview=preview,
+                alertsify_user_id=user_id,
+                alertsify_position_id=trade.alertsify_position_id,
+                alertsify_symbol=trade.alertsify_symbol,
+                tradier_option_symbol=trade.tradier_option_symbol,
+                tradier_close_order_id=close_order_id,
+                quantity=trade.quantity,
             )
-            if preview:
-                logger.info(
-                    "Preview only enabled; skipping DB persist and ntfy "
-                    "(alertsify_id=%s tradier_order_id=%s)",
-                    pos.id,
-                    order_id,
-                )
-                continue
+        except Exception:
+            logger.exception(
+                "ntfy failed after close user_id=%s alertsify_id=%s",
+                user_id,
+                trade.alertsify_position_id,
+            )
+        closed += 1
 
-            await _run_in_thread(
-                partial(
-                    db.record_placed_sync,
-                    settings,
-                    alertsify_position_id=pos.id,
-                    alertsify_symbol=pos.symbol,
-                    tradier_option_symbol=option_symbol,
-                    tradier_order_id=order_id,
-                    quantity=pos.quantity,
-                ),
-            )
+    for user_id, parsed in user_results:
+        total_positions += len(parsed.positions)
+        api_position_ids = {pos.id for pos in parsed.positions}
+
+        open_trades = await _run_in_thread(
+            partial(db.list_open_trades_sync, settings, user_id),
+        )
+        for trade in open_trades:
+            if trade.alertsify_position_id in api_position_ids:
+                continue
             try:
-                await ntfy.notify_trade_placed(
+                await close_trade(user_id, trade)
+            except Exception:
+                errors += 1
+                logger.exception(
+                    "Failed closing user_id=%s position id=%s",
+                    user_id,
+                    trade.alertsify_position_id,
+                )
+
+        for pos in parsed.positions:
+            try:
+                if await _run_in_thread(
+                    partial(db.has_open_placed_sync, settings, user_id, pos.id),
+                ):
+                    skipped_dup += 1
+                    logger.info(
+                        "skip duplicate user_id=%s alertsify_position_id=%s symbol=%s",
+                        user_id,
+                        pos.id,
+                        pos.symbol,
+                    )
+                    continue
+
+                chain = await get_chain(pos.ticker, pos.expiration_date)
+                option_symbol = tradier.resolve_tradier_option_symbol(chain, pos)
+                logger.info(
+                    "Resolved Tradier option_symbol=%s for user_id=%s alertsify_id=%s",
+                    option_symbol,
+                    user_id,
+                    pos.id,
+                )
+
+                preview = settings.tradier_preview_only
+                order_id = await tradier.place_option_order(
                     client,
                     settings,
-                    position=pos,
-                    tradier_option_symbol=option_symbol,
-                    tradier_order_id=order_id,
+                    underlying=pos.ticker,
+                    option_symbol=option_symbol,
+                    quantity=pos.quantity,
+                    preview=preview,
                 )
+                if preview:
+                    logger.info(
+                        "Preview only enabled; skipping DB persist and ntfy "
+                        "(user_id=%s alertsify_id=%s tradier_order_id=%s)",
+                        user_id,
+                        pos.id,
+                        order_id,
+                    )
+                    continue
+
+                await _run_in_thread(
+                    partial(
+                        db.record_placed_sync,
+                        settings,
+                        alertsify_user_id=user_id,
+                        alertsify_position_id=pos.id,
+                        alertsify_symbol=pos.symbol,
+                        underlying=pos.ticker,
+                        tradier_option_symbol=option_symbol,
+                        tradier_order_id=order_id,
+                        quantity=pos.quantity,
+                    ),
+                )
+                try:
+                    await ntfy.notify_trade_placed(
+                        client,
+                        settings,
+                        alertsify_user_id=user_id,
+                        position=pos,
+                        tradier_option_symbol=option_symbol,
+                        tradier_order_id=order_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "ntfy failed after successful placement user_id=%s alertsify_id=%s",
+                        user_id,
+                        pos.id,
+                    )
+                placed += 1
             except Exception:
+                errors += 1
                 logger.exception(
-                    "ntfy failed after successful placement alertsify_id=%s",
+                    "Failed processing user_id=%s position id=%s",
+                    user_id,
                     pos.id,
                 )
-            placed += 1
-        except Exception:
-            errors += 1
-            logger.exception("Failed processing position id=%s", pos.id)
 
     logger.info(
-        "Poll cycle finished positions=%d placed=%d skipped_dup=%d errors=%d",
-        len(parsed.positions),
+        "Poll cycle finished users=%d user_fetch_errors=%d positions=%d "
+        "placed=%d closed=%d skipped_dup=%d errors=%d",
+        len(settings.alertsify_user_ids),
+        user_fetch_errors,
+        total_positions,
         placed,
+        closed,
         skipped_dup,
         errors,
     )

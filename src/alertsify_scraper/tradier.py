@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -105,21 +106,31 @@ def _orders_url(settings: Settings) -> str:
     return f"{base}/v1/accounts/{settings.tradier_account_id}/orders"
 
 
-async def place_option_order(
+def underlying_from_option_symbol(option_symbol: str) -> str:
+    match = re.match(r"^([A-Z]+)", option_symbol)
+    if not match:
+        msg = f"Cannot parse underlying from option symbol {option_symbol!r}"
+        raise ValueError(msg)
+    return match.group(1)
+
+
+async def _submit_option_order(
     client: httpx.AsyncClient,
     settings: Settings,
     *,
     underlying: str,
     option_symbol: str,
     quantity: int,
+    side: str,
     preview: bool,
+    action: str,
 ) -> str:
     url = _orders_url(settings)
     form: dict[str, str | int | float] = {
         "class": "option",
         "symbol": underlying,
         "option_symbol": option_symbol,
-        "side": settings.tradier_option_side,
+        "side": side,
         "quantity": quantity,
         "type": settings.tradier_order_type,
         "duration": settings.tradier_order_duration,
@@ -131,12 +142,13 @@ async def place_option_order(
 
     mode = "preview" if preview else "live"
     logger.info(
-        "Submitting Tradier %s order underlying=%s option_symbol=%s qty=%s type=%s",
+        "Submitting Tradier %s %s order underlying=%s option_symbol=%s qty=%s side=%s",
         mode,
+        action,
         underlying,
         option_symbol,
         quantity,
-        settings.tradier_order_type,
+        side,
     )
     response = await client.post(
         url,
@@ -164,3 +176,45 @@ async def place_option_order(
         order.get("status"),
     )
     return order_id_str
+
+
+async def place_option_order(
+    client: httpx.AsyncClient,
+    settings: Settings,
+    *,
+    underlying: str,
+    option_symbol: str,
+    quantity: int,
+    preview: bool,
+) -> str:
+    return await _submit_option_order(
+        client,
+        settings,
+        underlying=underlying,
+        option_symbol=option_symbol,
+        quantity=quantity,
+        side=settings.tradier_option_side,
+        preview=preview,
+        action="open",
+    )
+
+
+async def close_option_order(
+    client: httpx.AsyncClient,
+    settings: Settings,
+    *,
+    underlying: str,
+    option_symbol: str,
+    quantity: int,
+    preview: bool,
+) -> str:
+    return await _submit_option_order(
+        client,
+        settings,
+        underlying=underlying,
+        option_symbol=option_symbol,
+        quantity=quantity,
+        side=settings.tradier_option_close_side,
+        preview=preview,
+        action="close",
+    )

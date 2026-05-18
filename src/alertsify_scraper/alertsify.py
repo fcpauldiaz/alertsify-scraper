@@ -55,20 +55,23 @@ def _positions_url(settings: Settings) -> str:
 async def fetch_option_positions(
     client: httpx.AsyncClient,
     settings: Settings,
+    user_id: str,
 ) -> OptionPositionsResponse:
     url = _positions_url(settings)
     headers = _alertsify_headers(settings)
 
     cookie_len = len(settings.alertsify_cookie) if settings.alertsify_cookie else 0
     logger.info(
-        "Fetching Alertsify positions from %s (auth=%s cookie_len=%d follow_redirects=True)",
+        "Fetching Alertsify positions user_id=%s from %s "
+        "(auth=%s cookie_len=%d follow_redirects=True)",
+        user_id,
         url,
         bool(settings.alertsify_authorization),
         cookie_len,
     )
     response = await client.get(
         url,
-        params={"userId": settings.alertsify_user_id},
+        params={"userId": user_id},
         headers=headers,
         follow_redirects=True,
     )
@@ -76,11 +79,26 @@ async def fetch_option_positions(
     payload: dict[str, Any] = response.json()
     parsed = OptionPositionsResponse.model_validate(payload)
     if not parsed.success:
-        msg = "Alertsify reported success=false"
+        msg = f"Alertsify reported success=false for user_id={user_id}"
         raise ValueError(msg)
     logger.info(
-        "Alertsify returned %d position(s) (total=%s)",
+        "Alertsify user_id=%s returned %d position(s) (total=%s)",
+        user_id,
         len(parsed.positions),
         parsed.total,
     )
     return parsed
+
+
+async def fetch_all_option_positions(
+    client: httpx.AsyncClient,
+    settings: Settings,
+) -> list[tuple[str, OptionPositionsResponse]]:
+    results: list[tuple[str, OptionPositionsResponse]] = []
+    for user_id in settings.alertsify_user_ids:
+        try:
+            parsed = await fetch_option_positions(client, settings, user_id)
+            results.append((user_id, parsed))
+        except Exception:
+            logger.exception("Failed fetching Alertsify positions for user_id=%s", user_id)
+    return results
