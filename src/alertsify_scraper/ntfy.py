@@ -37,6 +37,7 @@ async def notify_trade_placing(
     alertsify_user_id: str,
     position: OptionPosition,
     tradier_option_symbol: str,
+    order_quantity: int,
     preview: bool,
 ) -> None:
     mode = "preview" if preview else "live"
@@ -44,7 +45,8 @@ async def notify_trade_placing(
     body = (
         f"About to submit {mode} open order.\n"
         f"{position.ticker} {position.option_type} "
-        f"{position.expiration_date} @{position.strike} x{position.quantity}\n"
+        f"{position.expiration_date} @{position.strike} "
+        f"order_qty={order_quantity} (alertsify_qty={position.quantity})\n"
         f"alertsify_user_id={alertsify_user_id}\n"
         f"option_symbol={tradier_option_symbol}\n"
         f"alertsify_id={position.id}"

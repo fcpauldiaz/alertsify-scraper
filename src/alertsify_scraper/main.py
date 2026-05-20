@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from pydantic import ValidationError
 
-from alertsify_scraper import alertsify, db, market_hours, ntfy, tradier
+from alertsify_scraper import alertsify, db, market_hours, ntfy, sizing, tradier
 from alertsify_scraper.db import OpenTrade
 from alertsify_scraper.config import Settings
 
@@ -182,6 +182,48 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     pos.id,
                 )
 
+                quantity, premium = sizing.resolve_open_quantity(
+                    settings,
+                    chain,
+                    option_symbol,
+                    pos,
+                )
+                if premium is None:
+                    logger.warning(
+                        "Skip open: no valid premium user_id=%s alertsify_id=%s "
+                        "option_symbol=%s alertsify_qty=%s",
+                        user_id,
+                        pos.id,
+                        option_symbol,
+                        pos.quantity,
+                    )
+                    continue
+                if quantity < 1:
+                    cost_per_contract = premium * sizing.OPTION_CONTRACT_MULTIPLIER
+                    logger.warning(
+                        "Skip open: capital budget cannot buy 1 contract "
+                        "user_id=%s alertsify_id=%s option_symbol=%s "
+                        "max_capital=%s premium=%s cost_per_contract=%s alertsify_qty=%s",
+                        user_id,
+                        pos.id,
+                        option_symbol,
+                        settings.trade_max_capital,
+                        premium,
+                        cost_per_contract,
+                        pos.quantity,
+                    )
+                    continue
+                logger.info(
+                    "Sized order qty=%s max_capital=%s premium=%s alertsify_qty=%s "
+                    "user_id=%s alertsify_id=%s",
+                    quantity,
+                    settings.trade_max_capital,
+                    premium,
+                    pos.quantity,
+                    user_id,
+                    pos.id,
+                )
+
                 preview = settings.tradier_preview_only
                 try:
                     await ntfy.notify_trade_placing(
@@ -190,6 +232,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         alertsify_user_id=user_id,
                         position=pos,
                         tradier_option_symbol=option_symbol,
+                        order_quantity=quantity,
                         preview=preview,
                     )
                 except Exception:
@@ -203,7 +246,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     settings,
                     underlying=pos.ticker,
                     option_symbol=option_symbol,
-                    quantity=pos.quantity,
+                    quantity=quantity,
                     preview=preview,
                 )
                 if preview:
@@ -226,7 +269,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         underlying=pos.ticker,
                         tradier_option_symbol=option_symbol,
                         tradier_order_id=order_id,
-                        quantity=pos.quantity,
+                        quantity=quantity,
                     ),
                 )
                 placed += 1

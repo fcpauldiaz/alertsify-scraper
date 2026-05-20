@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     tradier_limit_price: float | None = None
     tradier_preview_only: bool = False
 
+    trade_max_capital: float = Field(default=2000.0, ge=1.0)
+
     ntfy_base_url: str = Field(default="https://ntfy.sh")
     ntfy_topic: str = Field(..., min_length=1)
 
