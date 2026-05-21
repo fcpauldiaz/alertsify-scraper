@@ -4,13 +4,15 @@ import logging
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from alertsify_scraper.config import Settings
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_ALERTSIFY_USER_AGENT = "curl/8.7.1"
+# Alertsify option premiums are cents per share (210 -> $2.10).
+ALERTSIFY_PRICE_CENTS_PER_DOLLAR = 100
 
 
 def _alertsify_headers(settings: Settings) -> dict[str, str]:
@@ -39,6 +41,13 @@ class OptionPosition(BaseModel):
     pnl: float
     option_type: str = Field(alias="optionType")
     is_broadcast: bool = Field(alias="isBroadcast")
+
+    @field_validator("entry_price", mode="before")
+    @classmethod
+    def entry_price_cents_to_dollars_per_share(cls, value: object) -> object:
+        if isinstance(value, (int, float)):
+            return float(value) / ALERTSIFY_PRICE_CENTS_PER_DOLLAR
+        return value
 
 
 class OptionPositionsResponse(BaseModel):

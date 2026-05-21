@@ -6,6 +6,7 @@ from alertsify_scraper.alertsify import OptionPosition
 from alertsify_scraper.config import Settings
 
 OPTION_CONTRACT_MULTIPLIER = 100
+MAX_ALERT_CHAIN_PREMIUM_DRIFT = 0.10
 
 
 def find_chain_row(
@@ -51,6 +52,25 @@ def premium_per_share_from_chain(
         return fallback_price
 
     return None
+
+
+def chain_premium_per_share(
+    chain: list[dict[str, Any]],
+    option_symbol: str,
+) -> float | None:
+    chain_row = find_chain_row(chain, option_symbol)
+    return premium_per_share_from_chain(chain_row)
+
+
+def premium_drift_from_alert(
+    chain: list[dict[str, Any]],
+    option_symbol: str,
+    position: OptionPosition,
+) -> float | None:
+    chain_premium = chain_premium_per_share(chain, option_symbol)
+    if chain_premium is None or position.entry_price <= 0:
+        return None
+    return abs(chain_premium - position.entry_price)
 
 
 def premium_per_share_for_open(

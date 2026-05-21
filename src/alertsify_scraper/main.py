@@ -79,6 +79,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
     placed = 0
     closed = 0
     skipped_dup = 0
+    skipped_drift = 0
     errors = 0
     total_positions = 0
 
@@ -181,6 +182,35 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     user_id,
                     pos.id,
                 )
+
+                drift = sizing.premium_drift_from_alert(chain, option_symbol, pos)
+                if drift is None:
+                    skipped_drift += 1
+                    logger.warning(
+                        "Skip open: cannot compare chain premium to alert entry "
+                        "user_id=%s alertsify_id=%s option_symbol=%s entry_price=%s",
+                        user_id,
+                        pos.id,
+                        option_symbol,
+                        pos.entry_price,
+                    )
+                    continue
+                if drift > sizing.MAX_ALERT_CHAIN_PREMIUM_DRIFT:
+                    skipped_drift += 1
+                    chain_premium = sizing.chain_premium_per_share(chain, option_symbol)
+                    logger.warning(
+                        "Skip open: chain premium drift exceeds %.2f "
+                        "user_id=%s alertsify_id=%s option_symbol=%s "
+                        "chain_premium=%s entry_price=%s drift=%s",
+                        sizing.MAX_ALERT_CHAIN_PREMIUM_DRIFT,
+                        user_id,
+                        pos.id,
+                        option_symbol,
+                        chain_premium,
+                        pos.entry_price,
+                        drift,
+                    )
+                    continue
 
                 quantity, premium, capital_cap = sizing.resolve_open_quantity(
                     settings,
@@ -286,13 +316,14 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
 
     logger.info(
         "Poll cycle finished users=%d user_fetch_errors=%d positions=%d "
-        "placed=%d closed=%d skipped_dup=%d errors=%d",
+        "placed=%d closed=%d skipped_dup=%d skipped_drift=%d errors=%d",
         len(settings.alertsify_user_ids),
         user_fetch_errors,
         total_positions,
         placed,
         closed,
         skipped_dup,
+        skipped_drift,
         errors,
     )
 
