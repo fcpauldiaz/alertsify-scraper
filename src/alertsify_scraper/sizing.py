@@ -81,9 +81,11 @@ def resolve_open_quantity(
     chain: list[dict[str, Any]],
     option_symbol: str,
     position: OptionPosition,
-) -> tuple[int, float | None]:
+) -> tuple[int, float | None, int]:
     premium = premium_per_share_for_open(settings, chain, option_symbol, position)
     if premium is None:
-        return 0, None
-    quantity = contracts_from_capital(settings.trade_max_capital, premium)
-    return quantity, premium
+        return 0, None, 0
+    capital_cap = contracts_from_capital(settings.trade_max_capital, premium)
+    alertsify_qty = max(position.quantity, 0)
+    quantity = min(alertsify_qty, capital_cap) if alertsify_qty > 0 else 0
+    return quantity, premium, capital_cap

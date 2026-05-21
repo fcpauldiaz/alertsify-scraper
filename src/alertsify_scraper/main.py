@@ -182,7 +182,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     pos.id,
                 )
 
-                quantity, premium = sizing.resolve_open_quantity(
+                quantity, premium, capital_cap = sizing.resolve_open_quantity(
                     settings,
                     chain,
                     option_symbol,
@@ -201,9 +201,10 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                 if quantity < 1:
                     cost_per_contract = premium * sizing.OPTION_CONTRACT_MULTIPLIER
                     logger.warning(
-                        "Skip open: capital budget cannot buy 1 contract "
+                        "Skip open: order quantity below 1 "
                         "user_id=%s alertsify_id=%s option_symbol=%s "
-                        "max_capital=%s premium=%s cost_per_contract=%s alertsify_qty=%s",
+                        "max_capital=%s premium=%s cost_per_contract=%s "
+                        "alertsify_qty=%s capital_cap=%s",
                         user_id,
                         pos.id,
                         option_symbol,
@@ -211,15 +212,17 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         premium,
                         cost_per_contract,
                         pos.quantity,
+                        capital_cap,
                     )
                     continue
                 logger.info(
-                    "Sized order qty=%s max_capital=%s premium=%s alertsify_qty=%s "
-                    "user_id=%s alertsify_id=%s",
+                    "Sized order qty=%s (alertsify_qty=%s capital_cap=%s) "
+                    "max_capital=%s premium=%s user_id=%s alertsify_id=%s",
                     quantity,
+                    pos.quantity,
+                    capital_cap,
                     settings.trade_max_capital,
                     premium,
-                    pos.quantity,
                     user_id,
                     pos.id,
                 )
