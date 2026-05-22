@@ -96,6 +96,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                 alertsify_user_id=user_id,
                 alertsify_position_id=trade.alertsify_position_id,
                 alertsify_symbol=trade.alertsify_symbol,
+                underlying=underlying,
                 tradier_option_symbol=trade.tradier_option_symbol,
                 quantity=trade.quantity,
                 preview=preview,
@@ -184,6 +185,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                 )
 
                 drift = sizing.premium_drift_from_alert(chain, option_symbol, pos)
+                chain_premium = sizing.chain_premium_per_share(chain, option_symbol)
                 if drift is None:
                     skipped_drift += 1
                     logger.warning(
@@ -194,10 +196,25 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         option_symbol,
                         pos.entry_price,
                     )
+                    try:
+                        await ntfy.notify_trade_skipped(
+                            client,
+                            settings,
+                            alertsify_user_id=user_id,
+                            position=pos,
+                            tradier_option_symbol=option_symbol,
+                            reason="drift_unavailable",
+                            chain_premium=chain_premium,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "ntfy failed on drift_unavailable skip user_id=%s alertsify_id=%s",
+                            user_id,
+                            pos.id,
+                        )
                     continue
                 if drift > sizing.MAX_ALERT_CHAIN_PREMIUM_DRIFT:
                     skipped_drift += 1
-                    chain_premium = sizing.chain_premium_per_share(chain, option_symbol)
                     logger.warning(
                         "Skip open: chain premium drift exceeds %.2f "
                         "user_id=%s alertsify_id=%s option_symbol=%s "
@@ -210,6 +227,23 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         pos.entry_price,
                         drift,
                     )
+                    try:
+                        await ntfy.notify_trade_skipped(
+                            client,
+                            settings,
+                            alertsify_user_id=user_id,
+                            position=pos,
+                            tradier_option_symbol=option_symbol,
+                            reason="drift_exceeded",
+                            chain_premium=chain_premium,
+                            drift=drift,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "ntfy failed on drift_exceeded skip user_id=%s alertsify_id=%s",
+                            user_id,
+                            pos.id,
+                        )
                     continue
 
                 quantity, premium, capital_cap = sizing.resolve_open_quantity(
@@ -227,6 +261,22 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         option_symbol,
                         pos.quantity,
                     )
+                    try:
+                        await ntfy.notify_trade_skipped(
+                            client,
+                            settings,
+                            alertsify_user_id=user_id,
+                            position=pos,
+                            tradier_option_symbol=option_symbol,
+                            reason="no_premium",
+                            chain_premium=chain_premium,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "ntfy failed on no_premium skip user_id=%s alertsify_id=%s",
+                            user_id,
+                            pos.id,
+                        )
                     continue
                 if quantity < 1:
                     cost_per_contract = premium * sizing.OPTION_CONTRACT_MULTIPLIER
@@ -244,6 +294,26 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         pos.quantity,
                         capital_cap,
                     )
+                    try:
+                        await ntfy.notify_trade_skipped(
+                            client,
+                            settings,
+                            alertsify_user_id=user_id,
+                            position=pos,
+                            tradier_option_symbol=option_symbol,
+                            reason="quantity_below_cap",
+                            chain_premium=chain_premium,
+                            drift=drift,
+                            premium_per_share=premium,
+                            capital_cap=capital_cap,
+                            cost_per_contract=cost_per_contract,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "ntfy failed on quantity_below_cap skip user_id=%s alertsify_id=%s",
+                            user_id,
+                            pos.id,
+                        )
                     continue
                 logger.info(
                     "Sized order qty=%s (alertsify_qty=%s capital_cap=%s) "
@@ -266,6 +336,9 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         position=pos,
                         tradier_option_symbol=option_symbol,
                         order_quantity=quantity,
+                        premium_per_share=premium,
+                        chain_premium=chain_premium,
+                        drift=drift,
                         preview=preview,
                     )
                 except Exception:

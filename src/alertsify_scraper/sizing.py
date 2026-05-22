@@ -6,7 +6,7 @@ from alertsify_scraper.alertsify import OptionPosition
 from alertsify_scraper.config import Settings
 
 OPTION_CONTRACT_MULTIPLIER = 100
-MAX_ALERT_CHAIN_PREMIUM_DRIFT = 0.10
+MAX_ALERT_CHAIN_PREMIUM_DRIFT = 0.15
 
 
 def find_chain_row(
