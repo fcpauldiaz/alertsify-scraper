@@ -95,7 +95,7 @@ async def _post_notification(
     base = settings.ntfy_base_url.rstrip("/")
     topic = settings.ntfy_topic.strip("/")
     url = f"{base}/{topic}"
-    logger.info("Sending ntfy notification to %s", url)
+    logger.debug("Sending ntfy notification to %s", url)
     response = await client.post(
         url,
         content=body,
@@ -108,7 +108,7 @@ async def _post_notification(
         },
     )
     response.raise_for_status()
-    logger.info("ntfy notification sent status=%s", response.status_code)
+    logger.debug("ntfy notification sent status=%s", response.status_code)
 
 
 async def notify_trade_placing(

@@ -27,6 +27,63 @@ def configure_logging() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
+    for noisy_logger in ("httpx", "httpcore"):
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+
+
+def _log_trade_open(
+    *,
+    user_id: str,
+    position: alertsify.OptionPosition,
+    option_symbol: str,
+    quantity: int,
+    premium: float,
+    order_id: str,
+    preview: bool,
+    persisted: bool,
+) -> None:
+    mode = "preview" if preview else "live"
+    persist_note = "db=skipped" if preview else ("db=recorded" if persisted else "db=pending")
+    logger.info(
+        "Trade OPEN %s user=%s %s %s %s strike=%s qty=%s premium=%s "
+        "option_symbol=%s order_id=%s %s",
+        mode,
+        user_id,
+        position.ticker,
+        position.option_type,
+        position.expiration_date,
+        position.strike,
+        quantity,
+        premium,
+        option_symbol,
+        order_id,
+        persist_note,
+    )
+
+
+def _log_trade_close(
+    *,
+    user_id: str,
+    trade: OpenTrade,
+    underlying: str,
+    order_id: str,
+    preview: bool,
+    persisted: bool,
+) -> None:
+    mode = "preview" if preview else "live"
+    persist_note = "db=skipped" if preview else ("db=recorded" if persisted else "db=pending")
+    logger.info(
+        "Trade CLOSE %s user=%s underlying=%s option_symbol=%s qty=%s "
+        "alertsify_id=%s order_id=%s %s",
+        mode,
+        user_id,
+        underlying,
+        trade.tradier_option_symbol,
+        trade.quantity,
+        trade.alertsify_position_id,
+        order_id,
+        persist_note,
+    )
 
 
 async def _run_in_thread(fn: Callable[[], T]) -> T:
@@ -122,12 +179,13 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
             preview=preview,
         )
         if preview:
-            logger.info(
-                "Preview only enabled; skipping DB close "
-                "(user_id=%s alertsify_id=%s close_order_id=%s)",
-                user_id,
-                trade.alertsify_position_id,
-                close_order_id,
+            _log_trade_close(
+                user_id=user_id,
+                trade=trade,
+                underlying=underlying,
+                order_id=close_order_id,
+                preview=True,
+                persisted=False,
             )
             return
         await _run_in_thread(
@@ -138,6 +196,14 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                 alertsify_position_id=trade.alertsify_position_id,
                 tradier_close_order_id=close_order_id,
             ),
+        )
+        _log_trade_close(
+            user_id=user_id,
+            trade=trade,
+            underlying=underlying,
+            order_id=close_order_id,
+            preview=False,
+            persisted=True,
         )
         closed += 1
 
@@ -356,13 +422,17 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     preview=preview,
                 )
                 if preview:
-                    logger.info(
-                        "Preview only enabled; skipping DB persist "
-                        "(user_id=%s alertsify_id=%s tradier_order_id=%s)",
-                        user_id,
-                        pos.id,
-                        order_id,
+                    _log_trade_open(
+                        user_id=user_id,
+                        position=pos,
+                        option_symbol=option_symbol,
+                        quantity=quantity,
+                        premium=premium,
+                        order_id=order_id,
+                        preview=True,
+                        persisted=False,
                     )
+                    placed += 1
                     continue
 
                 await _run_in_thread(
@@ -377,6 +447,16 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         tradier_order_id=order_id,
                         quantity=quantity,
                     ),
+                )
+                _log_trade_open(
+                    user_id=user_id,
+                    position=pos,
+                    option_symbol=option_symbol,
+                    quantity=quantity,
+                    premium=premium,
+                    order_id=order_id,
+                    preview=False,
+                    persisted=True,
                 )
                 placed += 1
             except Exception:

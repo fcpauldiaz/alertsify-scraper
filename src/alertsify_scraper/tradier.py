@@ -141,7 +141,7 @@ async def _submit_option_order(
         form["preview"] = "true"
 
     mode = "preview" if preview else "live"
-    logger.info(
+    logger.debug(
         "Submitting Tradier %s %s order underlying=%s option_symbol=%s qty=%s side=%s",
         mode,
         action,
@@ -169,7 +169,7 @@ async def _submit_option_order(
         msg = f"Tradier order missing id: {payload!r}"
         raise ValueError(msg)
     order_id_str = str(order_id)
-    logger.info(
+    logger.debug(
         "Tradier %s order accepted id=%s status=%s",
         mode,
         order_id_str,
