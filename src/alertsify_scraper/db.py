@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import libsql
 
-from alertsify_scraper.config import Settings
+from alertsify_scraper.config import Settings, TradingMode
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS placed_trades (
   tradier_option_symbol TEXT NOT NULL,
   tradier_order_id TEXT NOT NULL,
   quantity INTEGER NOT NULL,
+  trading_mode TEXT NOT NULL DEFAULT 'paper',
   status TEXT NOT NULL DEFAULT 'open',
   tradier_close_order_id TEXT,
   created_at TEXT NOT NULL,
@@ -71,6 +72,7 @@ MIGRATION_ADD_STATUS_COLUMNS = [
     "ALTER TABLE placed_trades ADD COLUMN status TEXT NOT NULL DEFAULT 'open'",
     "ALTER TABLE placed_trades ADD COLUMN tradier_close_order_id TEXT",
     "ALTER TABLE placed_trades ADD COLUMN closed_at TEXT",
+    "ALTER TABLE placed_trades ADD COLUMN trading_mode TEXT NOT NULL DEFAULT 'paper'",
 ]
 
 
@@ -82,6 +84,7 @@ class OpenTrade:
     underlying: str
     tradier_option_symbol: str
     quantity: int
+    trading_mode: TradingMode
 
 
 def _connect(settings: Settings):
@@ -160,7 +163,8 @@ def list_open_trades_sync(
               alertsify_symbol,
               underlying,
               tradier_option_symbol,
-              quantity
+              quantity,
+              trading_mode
             FROM placed_trades
             WHERE alertsify_user_id = ? AND status = ?
             """,
@@ -174,6 +178,7 @@ def list_open_trades_sync(
                 underlying=row[3],
                 tradier_option_symbol=row[4],
                 quantity=row[5],
+                trading_mode=row[6],
             )
             for row in rows
         ]
@@ -191,6 +196,7 @@ def record_placed_sync(
     tradier_option_symbol: str,
     tradier_order_id: str,
     quantity: int,
+    trading_mode: TradingMode,
 ) -> None:
     created_at = datetime.now(tz=UTC).isoformat()
     conn = _connect(settings)
@@ -205,15 +211,17 @@ def record_placed_sync(
               tradier_option_symbol,
               tradier_order_id,
               quantity,
+              trading_mode,
               status,
               created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(alertsify_user_id, alertsify_position_id) DO UPDATE SET
               alertsify_symbol = excluded.alertsify_symbol,
               underlying = excluded.underlying,
               tradier_option_symbol = excluded.tradier_option_symbol,
               tradier_order_id = excluded.tradier_order_id,
               quantity = excluded.quantity,
+              trading_mode = excluded.trading_mode,
               status = excluded.status,
               tradier_close_order_id = NULL,
               closed_at = NULL,
@@ -227,6 +235,7 @@ def record_placed_sync(
                 tradier_option_symbol,
                 tradier_order_id,
                 quantity,
+                trading_mode,
                 STATUS_OPEN,
                 created_at,
             ),

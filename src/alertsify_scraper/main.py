@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from alertsify_scraper import alertsify, db, market_hours, ntfy, sizing, tradier
 from alertsify_scraper.db import OpenTrade
-from alertsify_scraper.config import Settings
+from alertsify_scraper.config import Settings, TradingMode, TradierContext
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +42,13 @@ def _log_trade_open_submitting(
     quantity: int,
     premium: float,
     preview: bool,
+    trading_mode: TradingMode,
 ) -> None:
-    mode = "preview" if preview else "live"
+    exec_label = "preview" if preview else trading_mode
     logger.info(
         "%s OPEN %s submitting | %s %s %s strike=%s | qty=%s premium=%s | %s",
         _TRADE_LOG,
-        mode,
+        exec_label,
         position.ticker,
         position.option_type.upper(),
         position.expiration_date,
@@ -68,14 +69,15 @@ def _log_trade_open_placed(
     order_id: str,
     preview: bool,
     persisted: bool,
+    trading_mode: TradingMode,
 ) -> None:
-    mode = "preview" if preview else "live"
+    exec_label = "preview" if preview else trading_mode
     persist_note = "db=skipped" if preview else ("db=recorded" if persisted else "db=pending")
     logger.info(
         "%s OPEN %s placed | %s %s %s strike=%s | qty=%s premium=%s | "
         "order_id=%s | user=%s alertsify_id=%s | %s",
         _TRADE_LOG,
-        mode,
+        exec_label,
         position.ticker,
         position.option_type.upper(),
         position.expiration_date,
@@ -96,11 +98,11 @@ def _log_trade_close_submitting(
     underlying: str,
     preview: bool,
 ) -> None:
-    mode = "preview" if preview else "live"
+    exec_label = "preview" if preview else trade.trading_mode
     logger.info(
         "%s CLOSE %s submitting | %s | qty=%s | %s | user=%s alertsify_id=%s",
         _TRADE_LOG,
-        mode,
+        exec_label,
         underlying,
         trade.quantity,
         trade.tradier_option_symbol,
@@ -118,13 +120,13 @@ def _log_trade_close_placed(
     preview: bool,
     persisted: bool,
 ) -> None:
-    mode = "preview" if preview else "live"
+    exec_label = "preview" if preview else trade.trading_mode
     persist_note = "db=skipped" if preview else ("db=recorded" if persisted else "db=pending")
     logger.info(
         "%s CLOSE %s placed | %s | qty=%s | %s | order_id=%s | "
         "user=%s alertsify_id=%s | %s",
         _TRADE_LOG,
-        mode,
+        exec_label,
         underlying,
         trade.quantity,
         trade.tradier_option_symbol,
@@ -163,19 +165,25 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
     )
     user_results = await alertsify.fetch_all_option_positions(client, settings)
     user_fetch_errors = len(settings.alertsify_user_ids) - len(user_results)
-    chain_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    chain_cache: dict[tuple[TradingMode, str, str], list[dict[str, Any]]] = {}
 
-    async def get_chain(under: str, exp: str) -> list[dict[str, Any]]:
-        key = (under, exp)
+    async def get_chain(
+        ctx: TradierContext,
+        under: str,
+        exp: str,
+    ) -> list[dict[str, Any]]:
+        key = (ctx.mode, under, exp)
         if key not in chain_cache:
             chain_cache[key] = await tradier.fetch_option_chain(
                 client,
                 settings,
+                ctx,
                 under,
                 exp,
             )
             logger.info(
-                "Chain loaded underlying=%s expiration=%s contracts=%d",
+                "Chain loaded mode=%s underlying=%s expiration=%s contracts=%d",
+                ctx.mode,
                 under,
                 exp,
                 len(chain_cache[key]),
@@ -191,6 +199,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
 
     async def close_trade(user_id: str, trade: OpenTrade) -> None:
         nonlocal closed, errors
+        ctx = settings.tradier_context_for_mode(trade.trading_mode)
         underlying = trade.underlying or tradier.underlying_from_option_symbol(
             trade.tradier_option_symbol,
         )
@@ -206,6 +215,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                 tradier_option_symbol=trade.tradier_option_symbol,
                 quantity=trade.quantity,
                 preview=preview,
+                trading_mode=trade.trading_mode,
             )
         except Exception:
             logger.exception(
@@ -222,6 +232,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
         close_order_id = await tradier.close_option_order(
             client,
             settings,
+            ctx,
             underlying=underlying,
             option_symbol=trade.tradier_option_symbol,
             quantity=trade.quantity,
@@ -257,6 +268,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
         closed += 1
 
     for user_id, parsed in user_results:
+        ctx = settings.tradier_context_for_user(user_id)
         total_positions += len(parsed.positions)
         api_position_ids = {pos.id for pos in parsed.positions}
 
@@ -284,7 +296,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     skipped_dup += 1
                     continue
 
-                chain = await get_chain(pos.ticker, pos.expiration_date)
+                chain = await get_chain(ctx, pos.ticker, pos.expiration_date)
                 option_symbol = tradier.resolve_tradier_option_symbol(chain, pos)
                 logger.info(
                     "Resolved Tradier option_symbol=%s for user_id=%s alertsify_id=%s",
@@ -314,6 +326,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                             tradier_option_symbol=option_symbol,
                             reason="drift_unavailable",
                             chain_premium=chain_premium,
+                            trading_mode=ctx.mode,
                         )
                     except Exception:
                         logger.exception(
@@ -346,6 +359,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                             reason="drift_exceeded",
                             chain_premium=chain_premium,
                             drift=drift,
+                            trading_mode=ctx.mode,
                         )
                     except Exception:
                         logger.exception(
@@ -379,6 +393,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                             tradier_option_symbol=option_symbol,
                             reason="no_premium",
                             chain_premium=chain_premium,
+                            trading_mode=ctx.mode,
                         )
                     except Exception:
                         logger.exception(
@@ -416,6 +431,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                             premium_per_share=premium,
                             capital_cap=capital_cap,
                             cost_per_contract=cost_per_contract,
+                            trading_mode=ctx.mode,
                         )
                     except Exception:
                         logger.exception(
@@ -444,6 +460,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     quantity=quantity,
                     premium=premium,
                     preview=preview,
+                    trading_mode=ctx.mode,
                 )
                 try:
                     await ntfy.notify_trade_placing(
@@ -457,6 +474,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         chain_premium=chain_premium,
                         drift=drift,
                         preview=preview,
+                        trading_mode=ctx.mode,
                     )
                 except Exception:
                     logger.exception(
@@ -467,6 +485,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                 order_id = await tradier.place_option_order(
                     client,
                     settings,
+                    ctx,
                     underlying=pos.ticker,
                     option_symbol=option_symbol,
                     quantity=quantity,
@@ -482,6 +501,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         order_id=order_id,
                         preview=True,
                         persisted=False,
+                        trading_mode=ctx.mode,
                     )
                     placed += 1
                     continue
@@ -497,6 +517,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         tradier_option_symbol=option_symbol,
                         tradier_order_id=order_id,
                         quantity=quantity,
+                        trading_mode=ctx.mode,
                     ),
                 )
                 _log_trade_open_placed(
@@ -508,6 +529,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     order_id=order_id,
                     preview=False,
                     persisted=True,
+                    trading_mode=ctx.mode,
                 )
                 placed += 1
             except Exception:
@@ -535,12 +557,33 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
 async def async_main() -> None:
     settings = Settings()
     configure_logging()
+    if settings.using_legacy_user_config:
+        logger.warning(
+            "ALERTSIFY_USER_ID with TRADING_MODE is deprecated; "
+            "use ALERTSIFY_USER_ID_PAPER and ALERTSIFY_USER_ID_LIVE instead"
+        )
+    paper_users = sum(1 for m in settings.user_trading_modes.values() if m == "paper")
+    live_users = sum(1 for m in settings.user_trading_modes.values() if m == "live")
     logger.info(
-        "Tradier trading_mode=%s api_base=%s account_id=%s",
-        settings.trading_mode,
-        settings.tradier_api_base,
-        settings.tradier_account_id,
+        "Alertsify users: %d total (%d paper, %d live)",
+        len(settings.alertsify_user_ids),
+        paper_users,
+        live_users,
     )
+    if paper_users:
+        paper_ctx = settings.tradier_context_for_mode("paper")
+        logger.info(
+            "Tradier paper api_base=%s account_id=%s",
+            paper_ctx.api_base,
+            paper_ctx.account_id,
+        )
+    if live_users:
+        live_ctx = settings.tradier_context_for_mode("live")
+        logger.info(
+            "Tradier live api_base=%s account_id=%s",
+            live_ctx.api_base,
+            live_ctx.account_id,
+        )
     await _run_in_thread(partial(db.migrate_sync, settings))
 
     stop = asyncio.Event()

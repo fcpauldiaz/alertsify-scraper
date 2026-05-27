@@ -6,7 +6,7 @@ from typing import Literal
 import httpx
 
 from alertsify_scraper.alertsify import OptionPosition
-from alertsify_scraper.config import Settings
+from alertsify_scraper.config import Settings, TradingMode
 from alertsify_scraper.sizing import (
     MAX_ALERT_CHAIN_PREMIUM_DRIFT,
     OPTION_CONTRACT_MULTIPLIER,
@@ -62,8 +62,10 @@ def _fmt_contract(
     return f"**{ticker} ${strike_text} {type_label}** · {expiry}"
 
 
-def _fmt_mode(preview: bool) -> str:
-    return "PREVIEW" if preview else "LIVE"
+def _fmt_execution_label(preview: bool, trading_mode: TradingMode) -> str:
+    if preview:
+        return "PREVIEW"
+    return trading_mode.upper()
 
 
 def _fmt_user_short(user_id: str) -> str:
@@ -141,8 +143,9 @@ async def notify_trade_placing(
     chain_premium: float | None,
     drift: float | None,
     preview: bool,
+    trading_mode: TradingMode,
 ) -> None:
-    mode = _fmt_mode(preview)
+    mode = _fmt_execution_label(preview, trading_mode)
     contract = _fmt_contract(
         ticker=position.ticker,
         option_type=position.option_type,
@@ -243,6 +246,7 @@ async def notify_trade_skipped(
     position: OptionPosition,
     tradier_option_symbol: str,
     reason: SkipReason,
+    trading_mode: TradingMode,
     chain_premium: float | None = None,
     drift: float | None = None,
     premium_per_share: float | None = None,
@@ -257,7 +261,10 @@ async def notify_trade_skipped(
         expiration_label=position.expiration_label,
     )
     headline = _SKIP_REASON_HEADLINE[reason]
-    title = f"SKIP OPEN | {position.ticker} {position.option_type.upper()}"
+    title = (
+        f"SKIP OPEN ({trading_mode.upper()}) | "
+        f"{position.ticker} {position.option_type.upper()}"
+    )
     body = "\n\n".join(
         [
             contract,
@@ -307,8 +314,9 @@ async def notify_trade_closing(
     tradier_option_symbol: str,
     quantity: int,
     preview: bool,
+    trading_mode: TradingMode,
 ) -> None:
-    mode = _fmt_mode(preview)
+    mode = _fmt_execution_label(preview, trading_mode)
     title = f"{mode} CLOSE | {underlying}"
     body = "\n\n".join(
         [

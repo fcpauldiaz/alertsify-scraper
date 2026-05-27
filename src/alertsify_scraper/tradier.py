@@ -7,16 +7,16 @@ from typing import Any
 import httpx
 
 from alertsify_scraper.alertsify import OptionPosition
-from alertsify_scraper.config import Settings
+from alertsify_scraper.config import Settings, TradierContext
 
 logger = logging.getLogger(__name__)
 
 STRIKE_MAX_DIFF = 1e-3
 
 
-def _tradier_headers(settings: Settings) -> dict[str, str]:
+def _tradier_headers(ctx: TradierContext) -> dict[str, str]:
     return {
-        "Authorization": f"Bearer {settings.tradier_access_token}",
+        "Authorization": f"Bearer {ctx.access_token}",
         "Accept": "application/json",
     }
 
@@ -37,19 +37,21 @@ def _normalize_option_list(options_payload: dict[str, Any] | None) -> list[dict[
 async def fetch_option_chain(
     client: httpx.AsyncClient,
     settings: Settings,
+    ctx: TradierContext,
     underlying: str,
     expiration: str,
 ) -> list[dict[str, Any]]:
-    base = settings.tradier_api_base.rstrip("/")
+    base = ctx.api_base.rstrip("/")
     url = f"{base}/v1/markets/options/chains"
     logger.info(
-        "Fetching Tradier chain underlying=%s expiration=%s",
+        "Fetching Tradier chain mode=%s underlying=%s expiration=%s",
+        ctx.mode,
         underlying,
         expiration,
     )
     response = await client.get(
         url,
-        headers=_tradier_headers(settings),
+        headers=_tradier_headers(ctx),
         params={"symbol": underlying, "expiration": expiration},
     )
     response.raise_for_status()
@@ -101,9 +103,9 @@ def resolve_tradier_option_symbol(
     return best[1]
 
 
-def _orders_url(settings: Settings) -> str:
-    base = settings.tradier_api_base.rstrip("/")
-    return f"{base}/v1/accounts/{settings.tradier_account_id}/orders"
+def _orders_url(ctx: TradierContext) -> str:
+    base = ctx.api_base.rstrip("/")
+    return f"{base}/v1/accounts/{ctx.account_id}/orders"
 
 
 def underlying_from_option_symbol(option_symbol: str) -> str:
@@ -117,6 +119,7 @@ def underlying_from_option_symbol(option_symbol: str) -> str:
 async def _submit_option_order(
     client: httpx.AsyncClient,
     settings: Settings,
+    ctx: TradierContext,
     *,
     underlying: str,
     option_symbol: str,
@@ -125,7 +128,7 @@ async def _submit_option_order(
     preview: bool,
     action: str,
 ) -> str:
-    url = _orders_url(settings)
+    url = _orders_url(ctx)
     form: dict[str, str | int | float] = {
         "class": "option",
         "symbol": underlying,
@@ -140,10 +143,10 @@ async def _submit_option_order(
     if preview:
         form["preview"] = "true"
 
-    mode = "preview" if preview else "live"
+    submit_mode = "preview" if preview else ctx.mode
     logger.debug(
         "Submitting Tradier %s %s order underlying=%s option_symbol=%s qty=%s side=%s",
-        mode,
+        submit_mode,
         action,
         underlying,
         option_symbol,
@@ -153,7 +156,7 @@ async def _submit_option_order(
     response = await client.post(
         url,
         headers={
-            **_tradier_headers(settings),
+            **_tradier_headers(ctx),
             "Content-Type": "application/x-www-form-urlencoded",
         },
         data=form,
@@ -171,7 +174,7 @@ async def _submit_option_order(
     order_id_str = str(order_id)
     logger.debug(
         "Tradier %s order accepted id=%s status=%s",
-        mode,
+        submit_mode,
         order_id_str,
         order.get("status"),
     )
@@ -181,6 +184,7 @@ async def _submit_option_order(
 async def place_option_order(
     client: httpx.AsyncClient,
     settings: Settings,
+    ctx: TradierContext,
     *,
     underlying: str,
     option_symbol: str,
@@ -190,6 +194,7 @@ async def place_option_order(
     return await _submit_option_order(
         client,
         settings,
+        ctx,
         underlying=underlying,
         option_symbol=option_symbol,
         quantity=quantity,
@@ -202,6 +207,7 @@ async def place_option_order(
 async def close_option_order(
     client: httpx.AsyncClient,
     settings: Settings,
+    ctx: TradierContext,
     *,
     underlying: str,
     option_symbol: str,
@@ -211,6 +217,7 @@ async def close_option_order(
     return await _submit_option_order(
         client,
         settings,
+        ctx,
         underlying=underlying,
         option_symbol=option_symbol,
         quantity=quantity,
