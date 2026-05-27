@@ -31,7 +31,34 @@ def configure_logging() -> None:
         logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
 
-def _log_trade_open(
+_TRADE_LOG = ">>> TRADE"
+
+
+def _log_trade_open_submitting(
+    *,
+    user_id: str,
+    position: alertsify.OptionPosition,
+    option_symbol: str,
+    quantity: int,
+    premium: float,
+    preview: bool,
+) -> None:
+    mode = "preview" if preview else "live"
+    logger.info(
+        "%s OPEN %s submitting | %s %s %s strike=%s | qty=%s premium=%s | %s",
+        _TRADE_LOG,
+        mode,
+        position.ticker,
+        position.option_type.upper(),
+        position.expiration_date,
+        position.strike,
+        quantity,
+        premium,
+        option_symbol,
+    )
+
+
+def _log_trade_open_placed(
     *,
     user_id: str,
     position: alertsify.OptionPosition,
@@ -45,23 +72,44 @@ def _log_trade_open(
     mode = "preview" if preview else "live"
     persist_note = "db=skipped" if preview else ("db=recorded" if persisted else "db=pending")
     logger.info(
-        "Trade OPEN %s user=%s %s %s %s strike=%s qty=%s premium=%s "
-        "option_symbol=%s order_id=%s %s",
+        "%s OPEN %s placed | %s %s %s strike=%s | qty=%s premium=%s | "
+        "order_id=%s | user=%s alertsify_id=%s | %s",
+        _TRADE_LOG,
         mode,
-        user_id,
         position.ticker,
-        position.option_type,
+        position.option_type.upper(),
         position.expiration_date,
         position.strike,
         quantity,
         premium,
-        option_symbol,
         order_id,
+        user_id,
+        position.id,
         persist_note,
     )
 
 
-def _log_trade_close(
+def _log_trade_close_submitting(
+    *,
+    user_id: str,
+    trade: OpenTrade,
+    underlying: str,
+    preview: bool,
+) -> None:
+    mode = "preview" if preview else "live"
+    logger.info(
+        "%s CLOSE %s submitting | %s | qty=%s | %s | user=%s alertsify_id=%s",
+        _TRADE_LOG,
+        mode,
+        underlying,
+        trade.quantity,
+        trade.tradier_option_symbol,
+        user_id,
+        trade.alertsify_position_id,
+    )
+
+
+def _log_trade_close_placed(
     *,
     user_id: str,
     trade: OpenTrade,
@@ -73,15 +121,16 @@ def _log_trade_close(
     mode = "preview" if preview else "live"
     persist_note = "db=skipped" if preview else ("db=recorded" if persisted else "db=pending")
     logger.info(
-        "Trade CLOSE %s user=%s underlying=%s option_symbol=%s qty=%s "
-        "alertsify_id=%s order_id=%s %s",
+        "%s CLOSE %s placed | %s | qty=%s | %s | order_id=%s | "
+        "user=%s alertsify_id=%s | %s",
+        _TRADE_LOG,
         mode,
-        user_id,
         underlying,
-        trade.tradier_option_symbol,
         trade.quantity,
-        trade.alertsify_position_id,
+        trade.tradier_option_symbol,
         order_id,
+        user_id,
+        trade.alertsify_position_id,
         persist_note,
     )
 
@@ -164,11 +213,11 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                 user_id,
                 trade.alertsify_position_id,
             )
-        logger.info(
-            "Closing Tradier position user_id=%s alertsify_id=%s option_symbol=%s",
-            user_id,
-            trade.alertsify_position_id,
-            trade.tradier_option_symbol,
+        _log_trade_close_submitting(
+            user_id=user_id,
+            trade=trade,
+            underlying=underlying,
+            preview=preview,
         )
         close_order_id = await tradier.close_option_order(
             client,
@@ -179,7 +228,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
             preview=preview,
         )
         if preview:
-            _log_trade_close(
+            _log_trade_close_placed(
                 user_id=user_id,
                 trade=trade,
                 underlying=underlying,
@@ -197,7 +246,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                 tradier_close_order_id=close_order_id,
             ),
         )
-        _log_trade_close(
+        _log_trade_close_placed(
             user_id=user_id,
             trade=trade,
             underlying=underlying,
@@ -233,12 +282,6 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     partial(db.has_open_placed_sync, settings, user_id, pos.id),
                 ):
                     skipped_dup += 1
-                    logger.info(
-                        "skip duplicate user_id=%s alertsify_position_id=%s symbol=%s",
-                        user_id,
-                        pos.id,
-                        pos.symbol,
-                    )
                     continue
 
                 chain = await get_chain(pos.ticker, pos.expiration_date)
@@ -394,6 +437,14 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                 )
 
                 preview = settings.tradier_preview_only
+                _log_trade_open_submitting(
+                    user_id=user_id,
+                    position=pos,
+                    option_symbol=option_symbol,
+                    quantity=quantity,
+                    premium=premium,
+                    preview=preview,
+                )
                 try:
                     await ntfy.notify_trade_placing(
                         client,
@@ -422,7 +473,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     preview=preview,
                 )
                 if preview:
-                    _log_trade_open(
+                    _log_trade_open_placed(
                         user_id=user_id,
                         position=pos,
                         option_symbol=option_symbol,
@@ -448,7 +499,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         quantity=quantity,
                     ),
                 )
-                _log_trade_open(
+                _log_trade_open_placed(
                     user_id=user_id,
                     position=pos,
                     option_symbol=option_symbol,
