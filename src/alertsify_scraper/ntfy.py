@@ -32,9 +32,19 @@ _SKIP_REASON_HEADLINE: dict[SkipReason, str] = {
 }
 
 
+def _header_safe(text: str) -> str:
+    normalized = (
+        text.replace("·", "|")
+        .replace("—", "-")
+        .replace("…", "...")
+        .replace("×", "x")
+    )
+    return normalized.encode("ascii", "ignore").decode("ascii")
+
+
 def _fmt_price(value: float | None) -> str:
     if value is None:
-        return "—"
+        return "n/a"
     return f"${value:.2f}"
 
 
@@ -95,20 +105,28 @@ async def _post_notification(
     base = settings.ntfy_base_url.rstrip("/")
     topic = settings.ntfy_topic.strip("/")
     url = f"{base}/{topic}"
-    logger.debug("Sending ntfy notification to %s", url)
+    safe_title = _header_safe(title)
+    logger.info("Sending ntfy %s to %s", safe_title, url)
     response = await client.post(
         url,
-        content=body,
+        content=body.encode("utf-8"),
         headers={
-            "Title": title,
+            "Title": safe_title,
             "Tags": ",".join(tags),
             "Priority": priority,
             "Markdown": "yes",
-            "Content-Type": "text/markdown; charset=utf-8",
         },
     )
-    response.raise_for_status()
-    logger.debug("ntfy notification sent status=%s", response.status_code)
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError:
+        logger.error(
+            "ntfy rejected notification status=%s body=%s",
+            response.status_code,
+            response.text[:500],
+        )
+        raise
+    logger.info("ntfy sent %s status=%s", safe_title, response.status_code)
 
 
 async def notify_trade_placing(
@@ -142,7 +160,7 @@ async def notify_trade_placing(
     if position.current_price > 0:
         pricing_lines.append(f"Alertsify mark: {_fmt_price(position.current_price)}")
 
-    title = f"{mode} OPEN · {position.ticker} {position.option_type.upper()}"
+    title = f"{mode} OPEN | {position.ticker} {position.option_type.upper()}"
     body = "\n\n".join(
         [
             contract,
@@ -195,7 +213,7 @@ def _skip_detail_lines(
     if chain_premium is not None:
         lines.append(f"Chain: **{_fmt_price(chain_premium)}**")
     elif reason in ("drift_unavailable", "no_premium"):
-        lines.append("Chain: — (no quote)")
+        lines.append("Chain: n/a (no quote)")
 
     if drift is not None:
         lines.append(f"Drift: **{_fmt_price(drift)}**")
@@ -239,7 +257,7 @@ async def notify_trade_skipped(
         expiration_label=position.expiration_label,
     )
     headline = _SKIP_REASON_HEADLINE[reason]
-    title = f"SKIP OPEN · {position.ticker} {position.option_type.upper()}"
+    title = f"SKIP OPEN | {position.ticker} {position.option_type.upper()}"
     body = "\n\n".join(
         [
             contract,
@@ -291,7 +309,7 @@ async def notify_trade_closing(
     preview: bool,
 ) -> None:
     mode = _fmt_mode(preview)
-    title = f"{mode} CLOSE · {underlying}"
+    title = f"{mode} CLOSE | {underlying}"
     body = "\n\n".join(
         [
             f"Position removed from Alertsify — closing on Tradier.",
