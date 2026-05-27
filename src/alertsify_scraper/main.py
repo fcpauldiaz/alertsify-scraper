@@ -535,6 +535,12 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
 async def async_main() -> None:
     settings = Settings()
     configure_logging()
+    logger.info(
+        "Tradier trading_mode=%s api_base=%s account_id=%s",
+        settings.trading_mode,
+        settings.tradier_api_base,
+        settings.tradier_account_id,
+    )
     await _run_in_thread(partial(db.migrate_sync, settings))
 
     stop = asyncio.Event()

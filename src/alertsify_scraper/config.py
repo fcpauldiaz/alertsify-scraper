@@ -3,9 +3,12 @@ from __future__ import annotations
 from datetime import time
 from typing import Literal, Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+TRADIER_BASE_URL_PAPER = "https://sandbox.tradier.com"
+TRADIER_BASE_URL_LIVE = "https://api.tradier.com"
 
 
 class Settings(BaseSettings):
@@ -35,9 +38,11 @@ class Settings(BaseSettings):
     libsql_url: str = Field(..., min_length=1)
     libsql_auth_token: str = ""
 
-    tradier_api_base: str = Field(..., min_length=1)
-    tradier_access_token: str = Field(..., min_length=1)
-    tradier_account_id: str = Field(..., min_length=1)
+    trading_mode: Literal["paper", "live"] = Field(default="paper")
+    tradier_paper_api_key: str = ""
+    tradier_live_api_key: str = ""
+    tradier_paper_account_id: str = ""
+    tradier_live_account_id: str = ""
 
     tradier_option_side: str = Field(default="buy_to_open")
     tradier_option_close_side: str = Field(default="sell_to_close")
@@ -51,6 +56,27 @@ class Settings(BaseSettings):
     ntfy_base_url: str = Field(default="https://ntfy.sh")
     ntfy_topic: str = Field(..., min_length=1)
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def tradier_api_base(self) -> str:
+        if self.trading_mode == "paper":
+            return TRADIER_BASE_URL_PAPER
+        return TRADIER_BASE_URL_LIVE
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def tradier_access_token(self) -> str:
+        if self.trading_mode == "paper":
+            return self.tradier_paper_api_key
+        return self.tradier_live_api_key
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def tradier_account_id(self) -> str:
+        if self.trading_mode == "paper":
+            return self.tradier_paper_account_id
+        return self.tradier_live_account_id
+
     @model_validator(mode="after")
     def parse_alertsify_user_ids(self) -> Self:
         parts = [p.strip() for p in self.alertsify_user_id.split(",")]
@@ -60,6 +86,13 @@ class Settings(BaseSettings):
             raise ValueError(msg)
         object.__setattr__(self, "alertsify_user_ids", ids)
         return self
+
+    @field_validator("trading_mode", mode="before")
+    @classmethod
+    def normalize_trading_mode(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
 
     @field_validator("market_timezone", mode="after")
     @classmethod
@@ -101,7 +134,6 @@ class Settings(BaseSettings):
 
     @field_validator(
         "alertsify_base_url",
-        "tradier_api_base",
         "ntfy_base_url",
         mode="after",
     )
@@ -116,3 +148,17 @@ class Settings(BaseSettings):
         if self.tradier_order_type == "limit" and self.tradier_limit_price is None:
             msg = "TRADIER_LIMIT_PRICE is required when TRADIER_ORDER_TYPE=limit"
             raise ValueError(msg)
+        if self.trading_mode == "paper":
+            if not self.tradier_paper_api_key.strip():
+                msg = "TRADIER_PAPER_API_KEY is required when TRADING_MODE=paper"
+                raise ValueError(msg)
+            if not self.tradier_paper_account_id.strip():
+                msg = "TRADIER_PAPER_ACCOUNT_ID is required when TRADING_MODE=paper"
+                raise ValueError(msg)
+        else:
+            if not self.tradier_live_api_key.strip():
+                msg = "TRADIER_LIVE_API_KEY is required when TRADING_MODE=live"
+                raise ValueError(msg)
+            if not self.tradier_live_account_id.strip():
+                msg = "TRADIER_LIVE_ACCOUNT_ID is required when TRADING_MODE=live"
+                raise ValueError(msg)
