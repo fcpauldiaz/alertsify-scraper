@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from alertsify_scraper.alertsify import OptionPosition
-from alertsify_scraper.config import Settings
+from alertsify_scraper.config import Settings, TradingMode
 
 OPTION_CONTRACT_MULTIPLIER = 100
 MAX_ALERT_CHAIN_PREMIUM_DRIFT = 0.15
+
+DriftSkipReason = Literal["drift_unavailable", "drift_exceeded"]
 
 
 def find_chain_row(
@@ -71,6 +73,19 @@ def premium_drift_from_alert(
     if chain_premium is None or position.entry_price <= 0:
         return None
     return abs(chain_premium - position.entry_price)
+
+
+def drift_skip_reason(
+    trading_mode: TradingMode,
+    drift: float | None,
+) -> DriftSkipReason | None:
+    if trading_mode != "live":
+        return None
+    if drift is None:
+        return "drift_unavailable"
+    if drift > MAX_ALERT_CHAIN_PREMIUM_DRIFT:
+        return "drift_exceeded"
+    return None
 
 
 def premium_per_share_for_open(
