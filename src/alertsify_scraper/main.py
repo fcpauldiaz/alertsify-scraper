@@ -518,6 +518,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         tradier_order_id=order_id,
                         quantity=quantity,
                         trading_mode=ctx.mode,
+                        entry_premium_per_share=premium,
                     ),
                 )
                 _log_trade_open_placed(
