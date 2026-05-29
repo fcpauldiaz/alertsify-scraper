@@ -28,3 +28,6 @@ htmlcov/
 
 .cursor/
 *.plan.md
+
+dashboard/web/node_modules/
+dashboard/web/dist/

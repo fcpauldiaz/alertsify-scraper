@@ -103,9 +103,93 @@ def resolve_tradier_option_symbol(
     return best[1]
 
 
-def _orders_url(ctx: TradierContext) -> str:
+def _account_url(ctx: TradierContext, suffix: str) -> str:
     base = ctx.api_base.rstrip("/")
-    return f"{base}/v1/accounts/{ctx.account_id}/orders"
+    return f"{base}/v1/accounts/{ctx.account_id}/{suffix}"
+
+
+def _orders_url(ctx: TradierContext) -> str:
+    return _account_url(ctx, "orders")
+
+
+def _normalize_list_payload(raw: object) -> list[dict[str, Any]]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if isinstance(raw, dict):
+        return [raw]
+    return []
+
+
+async def fetch_account_balances(
+    client: httpx.AsyncClient,
+    ctx: TradierContext,
+) -> dict[str, Any]:
+    response = await client.get(
+        _account_url(ctx, "balances"),
+        headers=_tradier_headers(ctx),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    balances = payload.get("balances")
+    if isinstance(balances, dict):
+        return balances
+    return {}
+
+
+async def fetch_account_positions(
+    client: httpx.AsyncClient,
+    ctx: TradierContext,
+) -> list[dict[str, Any]]:
+    response = await client.get(
+        _account_url(ctx, "positions"),
+        headers=_tradier_headers(ctx),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    positions_block = payload.get("positions")
+    if not isinstance(positions_block, dict):
+        return []
+    return _normalize_list_payload(positions_block.get("position"))
+
+
+async def fetch_account_gainloss(
+    client: httpx.AsyncClient,
+    ctx: TradierContext,
+    *,
+    page: int = 1,
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    response = await client.get(
+        _account_url(ctx, "gainloss"),
+        headers=_tradier_headers(ctx),
+        params={"page": page, "limit": limit},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    gainloss_block = payload.get("gainloss")
+    if not isinstance(gainloss_block, dict):
+        return []
+    closed = gainloss_block.get("closed_position")
+    return _normalize_list_payload(closed)
+
+
+async def fetch_order(
+    client: httpx.AsyncClient,
+    ctx: TradierContext,
+    order_id: str,
+) -> dict[str, Any]:
+    response = await client.get(
+        f"{_orders_url(ctx)}/{order_id}",
+        headers=_tradier_headers(ctx),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    order = payload.get("order")
+    if isinstance(order, dict):
+        return order
+    return {}
 
 
 def underlying_from_option_symbol(option_symbol: str) -> str:

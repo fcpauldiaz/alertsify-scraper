@@ -1,0 +1,329 @@
+:root {
+  --surface: oklch(98% 0.01 250);
+  --surface-elevated: oklch(100% 0 0);
+  --text-primary: oklch(22% 0.02 250);
+  --text-muted: oklch(48% 0.02 250);
+  --border: oklch(88% 0.02 250);
+  --accent: oklch(52% 0.14 250);
+  --profit: oklch(45% 0.12 155);
+  --loss: oklch(48% 0.14 25);
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 32px;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius: 6px;
+  --max-width: 1280px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--surface);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-2);
+}
+
+.app-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-title h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.app-title p {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.live-badge {
+  display: inline-block;
+  margin-left: var(--space-1);
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--surface-elevated);
+  background: var(--accent);
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.period-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.period-tabs button {
+  padding: 6px 12px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.period-tabs button[aria-selected="true"] {
+  color: var(--text-primary);
+  background: var(--surface);
+  box-shadow: 0 1px 2px oklch(0% 0 0 / 0.06);
+}
+
+.api-key-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.api-key-field label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.api-key-field input {
+  width: 200px;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-elevated);
+}
+
+.banner {
+  padding: var(--space-2);
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+}
+
+.banner-error {
+  border-color: oklch(75% 0.1 25);
+  color: oklch(35% 0.12 25);
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.kpi-card {
+  padding: var(--space-2);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.kpi-card .label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.kpi-card .value {
+  margin-top: 4px;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+@media (max-width: 900px) {
+  .charts-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.chart-panel {
+  padding: var(--space-2);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.chart-panel h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.table-section h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-elevated);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-elevated);
+}
+
+th {
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+th button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+.status-open {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.status-closed {
+  color: var(--text-muted);
+}
+
+.pnl-positive {
+  color: var(--profit);
+  font-weight: 500;
+}
+
+.pnl-negative {
+  color: var(--loss);
+  font-weight: 500;
+}
+
+.pnl-neutral {
+  color: var(--text-muted);
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    oklch(94% 0.01 250) 25%,
+    oklch(97% 0.01 250) 50%,
+    oklch(94% 0.01 250) 75%
+  );
+  background-size: 200% 100%;
+  border-radius: 4px;
+  animation: shimmer 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.empty-state {
+  padding: var(--space-4);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.skeleton-kpi {
+  height: 72px;
+}
+
+.skeleton-chart {
+  height: 240px;
+}

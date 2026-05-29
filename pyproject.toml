@@ -12,10 +12,20 @@ dependencies = [
   "pydantic>=2",
   "pydantic-settings>=2",
   "libsql>=0.1.11",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
 
 [project.scripts]
 alertsify-scraper = "alertsify_scraper.main:main"
+alertsify-dashboard = "alertsify_scraper.dashboard.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
