@@ -307,7 +307,8 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
 
                 drift = sizing.premium_drift_from_alert(chain, option_symbol, pos)
                 chain_premium = sizing.chain_premium_per_share(chain, option_symbol)
-                if drift is None:
+                skip_reason = sizing.drift_skip_reason(ctx.mode, drift)
+                if skip_reason == "drift_unavailable":
                     skipped_drift += 1
                     logger.warning(
                         "Skip open: cannot compare chain premium to alert entry "
@@ -335,7 +336,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                             pos.id,
                         )
                     continue
-                if drift > sizing.MAX_ALERT_CHAIN_PREMIUM_DRIFT:
+                if skip_reason == "drift_exceeded":
                     skipped_drift += 1
                     logger.warning(
                         "Skip open: chain premium drift exceeds %.2f "
