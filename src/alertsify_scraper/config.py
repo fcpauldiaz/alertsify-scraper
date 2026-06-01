@@ -81,7 +81,6 @@ class Settings(BaseSettings):
     ntfy_base_url: str = Field(default="https://ntfy.sh")
     ntfy_topic: str = Field(..., min_length=1)
 
-    dashboard_api_key: str = ""
     dashboard_host: str = Field(default="127.0.0.1")
     dashboard_port: int = Field(default=8080, ge=1, le=65535)
     dashboard_cors_origin: str = Field(default="http://127.0.0.1:5173")

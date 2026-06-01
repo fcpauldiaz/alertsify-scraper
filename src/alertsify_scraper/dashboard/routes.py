@@ -9,9 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from alertsify_scraper.config import Settings
-from alertsify_scraper.dashboard.auth import require_dashboard_auth
-from alertsify_scraper.dashboard.bootstrap import inject_dashboard_bootstrap
 from alertsify_scraper.dashboard.serializers import (
     equity_point_to_dict,
     summary_to_dict,
@@ -25,12 +22,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 
-def get_settings(request: Request) -> Settings:
-    return request.app.state.settings
-
-
-def get_service(settings: Settings = Depends(get_settings)) -> DashboardService:
-    return DashboardService(settings)
+def get_service(request: Request) -> DashboardService:
+    return DashboardService(request.app.state.settings)
 
 
 def get_http_client(request: Request) -> httpx.AsyncClient:
@@ -46,16 +39,14 @@ PeriodQuery = Annotated[
 @router.get("/health")
 async def health(
     service: DashboardService = Depends(get_service),
-    settings: Settings = Depends(get_settings),
 ) -> dict[str, bool | str]:
     return {
         "status": "ok",
         "live_tradier_configured": service.live_configured(),
-        "auth_required": bool(settings.dashboard_api_key.strip()),
     }
 
 
-@router.get("/live/summary", dependencies=[Depends(require_dashboard_auth)])
+@router.get("/live/summary")
 async def live_summary(
     period: PeriodQuery = "all",
     service: DashboardService = Depends(get_service),
@@ -73,7 +64,7 @@ async def live_summary(
     return {"period": period, **summary_to_dict(summary)}
 
 
-@router.get("/live/trades", dependencies=[Depends(require_dashboard_auth)])
+@router.get("/live/trades")
 async def live_trades(
     period: PeriodQuery = "all",
     status: Annotated[str | None, Query()] = None,
@@ -104,7 +95,7 @@ async def live_trades(
     }
 
 
-@router.get("/live/equity-curve", dependencies=[Depends(require_dashboard_auth)])
+@router.get("/live/equity-curve")
 async def live_equity_curve(
     period: PeriodQuery = "all",
     service: DashboardService = Depends(get_service),
@@ -125,7 +116,7 @@ async def live_equity_curve(
     }
 
 
-def mount_static(app, dist_dir: Path, settings: Settings) -> None:
+def mount_static(app, dist_dir: Path) -> None:
     index = dist_dir / "index.html"
     if not dist_dir.is_dir() or not index.is_file():
         @app.get("/")
@@ -146,5 +137,4 @@ def mount_static(app, dist_dir: Path, settings: Settings) -> None:
     async def spa_fallback(full_path: str) -> HTMLResponse:
         if full_path.startswith("api"):
             raise HTTPException(status_code=404)
-        html = inject_dashboard_bootstrap(index_html, settings)
-        return HTMLResponse(html)
+        return HTMLResponse(index_html)

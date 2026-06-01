@@ -4,9 +4,6 @@ import {
   fetchHealth,
   fetchSummary,
   fetchTrades,
-  isApiKeyInjected,
-  resolveApiKey,
-  setStoredApiKey,
 } from "./api";
 import { Charts } from "./components/Charts";
 import { KpiGrid } from "./components/KpiGrid";
@@ -21,8 +18,6 @@ const PERIODS: { value: Period; label: string }[] = [
 
 export default function App() {
   const [period, setPeriod] = useState<Period>("all");
-  const [apiKey, setApiKey] = useState(resolveApiKey);
-  const keyInjected = isApiKeyInjected();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [equity, setEquity] = useState<EquityPoint[]>([]);
@@ -43,9 +38,9 @@ export default function App() {
         return;
       }
       const [summaryData, tradesData, equityData] = await Promise.all([
-        fetchSummary(period, apiKey),
-        fetchTrades(period, apiKey),
-        fetchEquityCurve(period, apiKey),
+        fetchSummary(period),
+        fetchTrades(period),
+        fetchEquityCurve(period),
       ]);
       setSummary(summaryData);
       setTrades(tradesData);
@@ -56,16 +51,11 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [period, apiKey]);
+  }, [period]);
 
   useEffect(() => {
     void load();
   }, [load]);
-
-  function handleApiKeyBlur() {
-    setStoredApiKey(apiKey);
-    void load();
-  }
 
   return (
     <div className="app-shell">
@@ -91,20 +81,6 @@ export default function App() {
               </button>
             ))}
           </div>
-          {!keyInjected ? (
-            <div className="api-key-field">
-              <label htmlFor="api-key">API key</label>
-              <input
-                id="api-key"
-                type="password"
-                autoComplete="off"
-                placeholder="Bearer token"
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                onBlur={handleApiKeyBlur}
-              />
-            </div>
-          ) : null}
         </div>
       </header>
 

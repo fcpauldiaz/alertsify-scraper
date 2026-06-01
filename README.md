@@ -26,7 +26,7 @@ Terminal 2 — UI with hot reload:
 cd dashboard/web && npm run dev
 ```
 
-Open http://127.0.0.1:5173. If `DASHBOARD_API_KEY` is set in `.env`, paste the same value into the API key field (stored in session storage).
+Open http://127.0.0.1:5173.
 
 ### Run (production static)
 
@@ -63,8 +63,6 @@ If `/` returns 404 but `/api/health` works, rebuild the image — the UI was not
 | `GET /api/live/summary?period=all\|7d\|30d` | Portfolio KPIs |
 | `GET /api/live/trades?period=...` | Trade list with P&L |
 | `GET /api/live/equity-curve?period=...` | Cumulative realized P&L by day |
-
-Protected routes require `Authorization: Bearer <DASHBOARD_API_KEY>` when `DASHBOARD_API_KEY` is non-empty.
 
 ### Design
 
