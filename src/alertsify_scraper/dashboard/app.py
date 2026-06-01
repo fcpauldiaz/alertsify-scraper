@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
@@ -17,7 +18,23 @@ from alertsify_scraper.dashboard.routes import mount_static, router
 
 logger = logging.getLogger(__name__)
 
-_DIST = Path(__file__).resolve().parents[3] / "dashboard" / "web" / "dist"
+
+def resolve_dashboard_dist() -> Path:
+    configured = os.environ.get("DASHBOARD_DIST_DIR", "").strip()
+    if configured:
+        return Path(configured)
+
+    module_dir = Path(__file__).resolve().parent
+    candidates = [
+        module_dir / "static",
+        Path("/app/dashboard/web/dist"),
+        module_dir.parents[3] / "dashboard" / "web" / "dist",
+        Path.cwd() / "dashboard" / "web" / "dist",
+    ]
+    for candidate in candidates:
+        if (candidate / "index.html").is_file():
+            return candidate
+    return candidates[0]
 
 
 @asynccontextmanager
@@ -43,7 +60,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
     app.include_router(router)
-    mount_static(app, _DIST)
+    dist_dir = resolve_dashboard_dist()
+    index = dist_dir / "index.html"
+    if index.is_file():
+        logger.info("Serving dashboard UI from %s", dist_dir)
+    else:
+        logger.warning("Dashboard UI dist missing at %s", dist_dir)
+    mount_static(app, dist_dir)
     return app
 
 

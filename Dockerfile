@@ -30,10 +30,9 @@ RUN apt-get update \
 
 COPY pyproject.toml ./
 COPY src ./src
+COPY --from=dashboard-ui /build/dashboard/web/dist ./src/alertsify_scraper/dashboard/static
 
 RUN pip install .
-
-COPY --from=dashboard-ui /build/dashboard/web/dist ./dashboard/web/dist
 
 RUN chown -R app:app /app
 
