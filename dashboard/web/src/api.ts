@@ -2,6 +2,33 @@ import type { EquityPoint, Period, Summary, Trade } from "./types";
 
 const API_KEY_STORAGE = "alertsify_dashboard_api_key";
 
+interface DashboardBootstrap {
+  apiKey?: string | null;
+  authRequired?: boolean;
+}
+
+declare global {
+  interface Window {
+    __ALERTSIFY_DASHBOARD__?: DashboardBootstrap;
+  }
+}
+
+export function getBootstrapConfig(): DashboardBootstrap {
+  return window.__ALERTSIFY_DASHBOARD__ ?? {};
+}
+
+export function isApiKeyInjected(): boolean {
+  return Boolean(getBootstrapConfig().apiKey?.trim());
+}
+
+export function resolveApiKey(): string {
+  const injected = getBootstrapConfig().apiKey?.trim();
+  if (injected) {
+    return injected;
+  }
+  return getStoredApiKey();
+}
+
 export function getStoredApiKey(): string {
   return sessionStorage.getItem(API_KEY_STORAGE) ?? "";
 }
@@ -27,7 +54,10 @@ async function fetchJson<T>(path: string, apiKey: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function fetchHealth(): Promise<{ live_tradier_configured: boolean }> {
+export async function fetchHealth(): Promise<{
+  live_tradier_configured: boolean;
+  auth_required?: boolean;
+}> {
   return fetchJson("/api/health", "");
 }
 

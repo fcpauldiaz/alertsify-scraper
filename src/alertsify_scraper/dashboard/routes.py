@@ -6,11 +6,12 @@ from typing import Annotated, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from alertsify_scraper.config import Settings
 from alertsify_scraper.dashboard.auth import require_dashboard_auth
+from alertsify_scraper.dashboard.bootstrap import inject_dashboard_bootstrap
 from alertsify_scraper.dashboard.serializers import (
     equity_point_to_dict,
     summary_to_dict,
@@ -45,10 +46,12 @@ PeriodQuery = Annotated[
 @router.get("/health")
 async def health(
     service: DashboardService = Depends(get_service),
+    settings: Settings = Depends(get_settings),
 ) -> dict[str, bool | str]:
     return {
         "status": "ok",
         "live_tradier_configured": service.live_configured(),
+        "auth_required": bool(settings.dashboard_api_key.strip()),
     }
 
 
@@ -122,7 +125,7 @@ async def live_equity_curve(
     }
 
 
-def mount_static(app, dist_dir: Path) -> None:
+def mount_static(app, dist_dir: Path, settings: Settings) -> None:
     index = dist_dir / "index.html"
     if not dist_dir.is_dir() or not index.is_file():
         @app.get("/")
@@ -135,10 +138,13 @@ def mount_static(app, dist_dir: Path) -> None:
 
         return
 
+    index_html = index.read_text(encoding="utf-8")
+
     app.mount("/assets", StaticFiles(directory=dist_dir / "assets"), name="assets")
 
     @app.get("/{full_path:path}")
-    async def spa_fallback(full_path: str) -> FileResponse:
+    async def spa_fallback(full_path: str) -> HTMLResponse:
         if full_path.startswith("api"):
             raise HTTPException(status_code=404)
-        return FileResponse(index)
+        html = inject_dashboard_bootstrap(index_html, settings)
+        return HTMLResponse(html)

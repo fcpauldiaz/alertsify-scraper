@@ -4,7 +4,8 @@ import {
   fetchHealth,
   fetchSummary,
   fetchTrades,
-  getStoredApiKey,
+  isApiKeyInjected,
+  resolveApiKey,
   setStoredApiKey,
 } from "./api";
 import { Charts } from "./components/Charts";
@@ -20,7 +21,8 @@ const PERIODS: { value: Period; label: string }[] = [
 
 export default function App() {
   const [period, setPeriod] = useState<Period>("all");
-  const [apiKey, setApiKey] = useState(getStoredApiKey);
+  const [apiKey, setApiKey] = useState(resolveApiKey);
+  const keyInjected = isApiKeyInjected();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [equity, setEquity] = useState<EquityPoint[]>([]);
@@ -89,18 +91,20 @@ export default function App() {
               </button>
             ))}
           </div>
-          <div className="api-key-field">
-            <label htmlFor="api-key">API key</label>
-            <input
-              id="api-key"
-              type="password"
-              autoComplete="off"
-              placeholder="Bearer token"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              onBlur={handleApiKeyBlur}
-            />
-          </div>
+          {!keyInjected ? (
+            <div className="api-key-field">
+              <label htmlFor="api-key">API key</label>
+              <input
+                id="api-key"
+                type="password"
+                autoComplete="off"
+                placeholder="Bearer token"
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+                onBlur={handleApiKeyBlur}
+              />
+            </div>
+          ) : null}
         </div>
       </header>
 

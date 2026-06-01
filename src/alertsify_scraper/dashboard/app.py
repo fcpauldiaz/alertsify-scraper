@@ -66,7 +66,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger.info("Serving dashboard UI from %s", dist_dir)
     else:
         logger.warning("Dashboard UI dist missing at %s", dist_dir)
-    mount_static(app, dist_dir)
+    mount_static(app, dist_dir, resolved)
     return app
 
 
