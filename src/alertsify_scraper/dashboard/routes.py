@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -17,6 +18,8 @@ from alertsify_scraper.dashboard.serializers import (
 )
 from alertsify_scraper.dashboard.service import DashboardService
 from alertsify_scraper.performance import PeriodFilter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
@@ -120,15 +123,22 @@ async def live_equity_curve(
 
 
 def mount_static(app, dist_dir: Path) -> None:
-    if not dist_dir.is_dir():
+    index = dist_dir / "index.html"
+    if not dist_dir.is_dir() or not index.is_file():
+        @app.get("/")
+        async def root_without_ui() -> dict[str, str]:
+            logger.warning("Dashboard UI dist missing at %s", dist_dir)
+            return {
+                "status": "api_only",
+                "message": "Dashboard UI is not built. Use /api/health and /api/live/*.",
+            }
+
         return
+
     app.mount("/assets", StaticFiles(directory=dist_dir / "assets"), name="assets")
 
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str) -> FileResponse:
         if full_path.startswith("api"):
-            raise HTTPException(status_code=404)
-        index = dist_dir / "index.html"
-        if not index.is_file():
             raise HTTPException(status_code=404)
         return FileResponse(index)

@@ -37,6 +37,24 @@ alertsify-dashboard
 
 Built assets are served from `dashboard/web/dist` at the same host as the API (default http://127.0.0.1:8080).
 
+### Run (Docker / Coolify)
+
+The Dockerfile builds the React UI and starts `alertsify-dashboard` on port **8080** with `DASHBOARD_HOST=0.0.0.0`.
+
+```bash
+docker build -t alertsify-dashboard .
+docker run --rm -p 8080:8080 --env-file .env alertsify-dashboard
+```
+
+In Coolify:
+
+1. Expose container port **8080** (matches `DASHBOARD_PORT`).
+2. Leave **Start Command** empty so the image runs `alertsify-dashboard`.
+3. Set `DASHBOARD_HOST=0.0.0.0` (already the Docker default).
+4. Verify: `GET /api/health` returns JSON before opening `/`.
+
+If `/` returns 404 but `/api/health` works, rebuild the image — the UI was not included in the deploy.
+
 ### API
 
 | Endpoint | Description |
