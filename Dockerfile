@@ -1,12 +1,26 @@
+# syntax=docker/dockerfile:1
+
+FROM node:22-slim-bookworm AS web
+
+WORKDIR /web
+
+COPY dashboard/web/package.json dashboard/web/package-lock.json ./
+RUN npm ci
+
+COPY dashboard/web/ ./
+RUN npm run build
+
 FROM python:3.12-slim-bookworm
 
-# Build: docker build -t alertsify-scraper .
-# Run:  docker run --rm --env-file .env alertsify-scraper
+# Build: docker build -t alertsify-dashboard .
+# Run:  docker run --rm -p 8080:8080 --env-file .env alertsify-dashboard
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DASHBOARD_HOST=0.0.0.0 \
+    DASHBOARD_PORT=8080
 
 WORKDIR /app
 
@@ -17,6 +31,7 @@ RUN apt-get update \
 
 COPY pyproject.toml ./
 COPY src ./src
+COPY --from=web /web/dist ./dashboard/web/dist
 
 RUN pip install .
 
@@ -24,4 +39,6 @@ RUN chown -R app:app /app
 
 USER app
 
-CMD ["alertsify-scraper"]
+EXPOSE 8080
+
+CMD ["alertsify-dashboard"]
