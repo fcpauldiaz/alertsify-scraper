@@ -54,6 +54,44 @@ def test_build_trade_performance_uses_gainloss_for_closed() -> None:
     assert perf.unrealized_pnl is None
 
 
+def test_build_trade_performance_prefers_order_fill_for_entry() -> None:
+    trade = _trade(status="open", entry=2.0, exit_p=None, closed_at=None)
+    orders = {"open-1": {"avg_fill_price": 2.15, "status": "filled"}}
+    perf = build_trade_performance(trade, {}, {}, orders_by_id=orders)
+    assert perf.entry_premium_per_share == 2.15
+
+
+def test_build_trade_performance_realized_from_order_fills() -> None:
+    trade = _trade(realized=None, entry=99.0, exit_p=99.0)
+    orders = {
+        "open-1": {"avg_fill_price": 2.0, "status": "filled"},
+        "close-1": {"avg_fill_price": 2.5, "status": "filled"},
+    }
+    perf = build_trade_performance(trade, {}, {}, orders_by_id=orders)
+    assert perf.realized_pnl == (2.5 - 2.0) * 2 * 100
+    assert perf.entry_premium_per_share == 2.0
+    assert perf.current_or_exit_premium_per_share == 2.5
+
+
+def test_build_trade_performance_gainloss_overrides_fill_pnl() -> None:
+    trade = _trade(realized=None)
+    gainloss = {
+        "symbol": trade.tradier_option_symbol,
+        "gain_loss": 120.0,
+    }
+    orders = {
+        "open-1": {"avg_fill_price": 2.0, "status": "filled"},
+        "close-1": {"avg_fill_price": 2.3, "status": "filled"},
+    }
+    perf = build_trade_performance(
+        trade,
+        {},
+        index_gainloss_by_symbol([gainloss]),
+        orders_by_id=orders,
+    )
+    assert perf.realized_pnl == 120.0
+
+
 def test_build_trade_performance_computes_unrealized_from_position() -> None:
     trade = _trade(status="open", exit_p=None, closed_at=None)
     positions = [

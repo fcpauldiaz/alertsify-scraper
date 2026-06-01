@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from alertsify_scraper.db import PlacedTrade, STATUS_CLOSED, STATUS_OPEN
 from alertsify_scraper.sizing import OPTION_CONTRACT_MULTIPLIER
+from alertsify_scraper.tradier import order_fill_premium_per_share, position_entry_premium_per_share
 
 PeriodFilter = Literal["all", "7d", "30d"]
 
@@ -127,7 +128,44 @@ def index_gainloss_by_symbol(
 
 
 def _position_mark_premium(row: dict[str, Any]) -> float | None:
-    return _float_field(row, "last", "close", "average_cost")
+    return _float_field(row, "last", "close")
+
+
+def _resolve_entry_premium_per_share(
+    trade: PlacedTrade,
+    position_row: dict[str, Any] | None,
+    open_order: dict[str, Any] | None,
+) -> float | None:
+    if open_order:
+        fill = order_fill_premium_per_share(open_order)
+        if fill is not None:
+            return fill
+    if position_row is not None:
+        position_entry = position_entry_premium_per_share(position_row)
+        if position_entry is not None:
+            return position_entry
+    return trade.entry_premium_per_share
+
+
+def _resolve_exit_premium_per_share(
+    trade: PlacedTrade,
+    close_order: dict[str, Any] | None,
+) -> float | None:
+    if close_order:
+        fill = order_fill_premium_per_share(close_order)
+        if fill is not None:
+            return fill
+    return trade.exit_premium_per_share
+
+
+def _pnl_from_fill_prices(
+    entry_premium: float | None,
+    exit_premium: float | None,
+    quantity: int,
+) -> float | None:
+    if entry_premium is None or exit_premium is None:
+        return None
+    return (exit_premium - entry_premium) * quantity * OPTION_CONTRACT_MULTIPLIER
 
 
 def _gainloss_realized(row: dict[str, Any]) -> float | None:
@@ -159,39 +197,41 @@ def _hold_duration_seconds(trade: PlacedTrade) -> float | None:
 def _computed_realized_pnl(
     trade: PlacedTrade,
     gainloss_row: dict[str, Any] | None,
+    *,
+    entry_premium: float | None,
+    exit_premium: float | None,
 ) -> float | None:
-    if trade.realized_pnl is not None:
-        return trade.realized_pnl
     if gainloss_row is not None:
         gl = _gainloss_realized(gainloss_row)
         if gl is not None:
             return gl
-    entry = trade.entry_premium_per_share
-    exit_p = trade.exit_premium_per_share
-    if entry is not None and exit_p is not None:
-        return (exit_p - entry) * trade.quantity * OPTION_CONTRACT_MULTIPLIER
-    return None
+    fill_pnl = _pnl_from_fill_prices(entry_premium, exit_premium, trade.quantity)
+    if fill_pnl is not None:
+        return fill_pnl
+    if trade.realized_pnl is not None:
+        return trade.realized_pnl
+    return _pnl_from_fill_prices(
+        trade.entry_premium_per_share,
+        trade.exit_premium_per_share,
+        trade.quantity,
+    )
 
 
 def _computed_unrealized_pnl(
     trade: PlacedTrade,
     position_row: dict[str, Any] | None,
+    *,
+    entry_premium: float | None,
 ) -> float | None:
-    entry = trade.entry_premium_per_share
-    if entry is None:
-        return None
-    current: float | None = None
     if position_row is not None:
-        current = _position_mark_premium(position_row)
-        cost = _float_field(position_row, "cost_basis", "average_cost")
         gl = _float_field(position_row, "gain_loss", "gainloss")
         if gl is not None:
             return gl
-        if cost is not None and current is not None:
-            qty_mult = trade.quantity * OPTION_CONTRACT_MULTIPLIER
-            return (current - entry) * qty_mult
-    if current is not None:
-        return (current - entry) * trade.quantity * OPTION_CONTRACT_MULTIPLIER
+    if entry_premium is None:
+        return None
+    mark = _position_mark_premium(position_row) if position_row is not None else None
+    if mark is not None:
+        return (mark - entry_premium) * trade.quantity * OPTION_CONTRACT_MULTIPLIER
     return None
 
 
@@ -199,22 +239,48 @@ def build_trade_performance(
     trade: PlacedTrade,
     positions_by_symbol: dict[str, dict[str, Any]],
     gainloss_by_symbol: dict[str, dict[str, Any]],
+    orders_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> TradePerformance:
     position_row = positions_by_symbol.get(trade.tradier_option_symbol)
     gainloss_row = gainloss_by_symbol.get(trade.tradier_option_symbol)
+    orders = orders_by_id or {}
+    open_order = orders.get(trade.tradier_order_id)
+    close_order = (
+        orders.get(trade.tradier_close_order_id)
+        if trade.tradier_close_order_id
+        else None
+    )
 
-    realized = _computed_realized_pnl(trade, gainloss_row) if trade.status == STATUS_CLOSED else None
+    entry_premium = _resolve_entry_premium_per_share(trade, position_row, open_order)
+    exit_premium = _resolve_exit_premium_per_share(trade, close_order)
+
+    realized = (
+        _computed_realized_pnl(
+            trade,
+            gainloss_row,
+            entry_premium=entry_premium,
+            exit_premium=exit_premium,
+        )
+        if trade.status == STATUS_CLOSED
+        else None
+    )
     unrealized = (
-        _computed_unrealized_pnl(trade, position_row) if trade.status == STATUS_OPEN else None
+        _computed_unrealized_pnl(
+            trade,
+            position_row,
+            entry_premium=entry_premium,
+        )
+        if trade.status == STATUS_OPEN
+        else None
     )
 
     current_or_exit: float | None = None
     if trade.status == STATUS_OPEN and position_row is not None:
         current_or_exit = _position_mark_premium(position_row)
-    elif trade.exit_premium_per_share is not None:
-        current_or_exit = trade.exit_premium_per_share
+    elif exit_premium is not None:
+        current_or_exit = exit_premium
 
-    notional = _notional(trade.quantity, trade.entry_premium_per_share)
+    notional = _notional(trade.quantity, entry_premium)
     active_pnl = unrealized if trade.status == STATUS_OPEN else realized
 
     return TradePerformance(
@@ -225,7 +291,7 @@ def build_trade_performance(
         tradier_option_symbol=trade.tradier_option_symbol,
         quantity=trade.quantity,
         status=trade.status,
-        entry_premium_per_share=trade.entry_premium_per_share,
+        entry_premium_per_share=entry_premium,
         current_or_exit_premium_per_share=current_or_exit,
         unrealized_pnl=unrealized,
         realized_pnl=realized,

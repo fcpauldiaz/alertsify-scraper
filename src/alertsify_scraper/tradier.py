@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -8,6 +9,7 @@ import httpx
 
 from alertsify_scraper.alertsify import OptionPosition
 from alertsify_scraper.config import Settings, TradierContext
+from alertsify_scraper.sizing import OPTION_CONTRACT_MULTIPLIER
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +192,61 @@ async def fetch_order(
     if isinstance(order, dict):
         return order
     return {}
+
+
+def _positive_float(value: object) -> float | None:
+    if isinstance(value, (int, float)) and value > 0:
+        return float(value)
+    return None
+
+
+def order_fill_premium_per_share(order: dict[str, Any]) -> float | None:
+    status = order.get("status")
+    if isinstance(status, str) and status.lower() in {"canceled", "cancelled", "rejected", "expired"}:
+        return None
+    fill = _positive_float(order.get("avg_fill_price"))
+    if fill is not None:
+        return fill
+    leg = order.get("leg")
+    legs = [leg] if isinstance(leg, dict) else leg if isinstance(leg, list) else []
+    for row in legs:
+        if isinstance(row, dict):
+            leg_fill = _positive_float(row.get("avg_fill_price"))
+            if leg_fill is not None:
+                return leg_fill
+    return None
+
+
+def position_entry_premium_per_share(row: dict[str, Any]) -> float | None:
+    cost_basis = row.get("cost_basis")
+    quantity = row.get("quantity")
+    if not isinstance(cost_basis, (int, float)) or not isinstance(quantity, (int, float)):
+        return None
+    if quantity == 0:
+        return None
+    return abs(float(cost_basis)) / (abs(float(quantity)) * OPTION_CONTRACT_MULTIPLIER)
+
+
+async def fetch_orders_by_id(
+    client: httpx.AsyncClient,
+    ctx: TradierContext,
+    order_ids: set[str],
+) -> dict[str, dict[str, Any]]:
+    ids = {order_id.strip() for order_id in order_ids if order_id.strip()}
+    if not ids:
+        return {}
+
+    async def fetch_one(order_id: str) -> tuple[str, dict[str, Any]]:
+        try:
+            order = await fetch_order(client, ctx, order_id)
+        except httpx.HTTPError:
+            logger.warning("Failed fetching Tradier order id=%s", order_id)
+            return order_id, {}
+        return order_id, order
+
+
+    results = await asyncio.gather(*(fetch_one(order_id) for order_id in ids))
+    return {order_id: order for order_id, order in results if order}
 
 
 def underlying_from_option_symbol(option_symbol: str) -> str:

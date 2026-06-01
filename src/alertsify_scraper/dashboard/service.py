@@ -8,6 +8,7 @@ import httpx
 
 from alertsify_scraper import db, performance, tradier
 from alertsify_scraper.config import Settings
+from alertsify_scraper.db import PlacedTrade
 from alertsify_scraper.performance import PeriodFilter
 
 
@@ -35,6 +36,50 @@ class DashboardService:
         )
         return balances, positions, gainloss
 
+    def _order_ids_for_trades(self, trades: list[PlacedTrade]) -> set[str]:
+        order_ids: set[str] = set()
+        for trade in trades:
+            if trade.tradier_order_id:
+                order_ids.add(trade.tradier_order_id)
+            if trade.tradier_close_order_id:
+                order_ids.add(trade.tradier_close_order_id)
+        return order_ids
+
+    async def _fetch_broker_orders(
+        self,
+        client: httpx.AsyncClient,
+        trades: list[PlacedTrade],
+    ) -> dict[str, dict[str, Any]]:
+        if not self._has_live_credentials():
+            return {}
+        ctx = self._settings.tradier_context_for_mode("live")
+        return await tradier.fetch_orders_by_id(
+            client,
+            ctx,
+            self._order_ids_for_trades(trades),
+        )
+
+    async def _build_trade_rows(
+        self,
+        client: httpx.AsyncClient,
+        placed: list[PlacedTrade],
+    ) -> tuple[list[performance.TradePerformance], performance.AccountBalancesView]:
+        balances_raw, positions, gainloss = await self._fetch_tradier_live(client)
+        orders_by_id = await self._fetch_broker_orders(client, placed)
+        balances_view = performance.parse_balances_view(balances_raw)
+        positions_by_symbol = performance.index_positions_by_symbol(positions)
+        gainloss_by_symbol = performance.index_gainloss_by_symbol(gainloss)
+        trade_rows = [
+            performance.build_trade_performance(
+                trade,
+                positions_by_symbol,
+                gainloss_by_symbol,
+                orders_by_id,
+            )
+            for trade in placed
+        ]
+        return trade_rows, balances_view
+
     async def load_live_trades(
         self,
         client: httpx.AsyncClient,
@@ -44,15 +89,7 @@ class DashboardService:
         placed = await asyncio.to_thread(
             partial(db.list_live_trades_sync, self._settings),
         )
-        balances_raw, positions, gainloss = await self._fetch_tradier_live(client)
-        balances_view = performance.parse_balances_view(balances_raw)
-        positions_by_symbol = performance.index_positions_by_symbol(positions)
-        gainloss_by_symbol = performance.index_gainloss_by_symbol(gainloss)
-
-        trade_rows = [
-            performance.build_trade_performance(trade, positions_by_symbol, gainloss_by_symbol)
-            for trade in placed
-        ]
+        trade_rows, balances_view = await self._build_trade_rows(client, placed)
         return performance.filter_trades_by_period(trade_rows, period), balances_view
 
     async def get_summary(
@@ -81,14 +118,8 @@ class DashboardService:
                     limit=limit,
                 ),
             )
-            balances_raw, positions, gainloss = await self._fetch_tradier_live(client)
-            positions_by_symbol = performance.index_positions_by_symbol(positions)
-            gainloss_by_symbol = performance.index_gainloss_by_symbol(gainloss)
-            trades = [
-                performance.build_trade_performance(t, positions_by_symbol, gainloss_by_symbol)
-                for t in placed
-            ]
-            return performance.filter_trades_by_period(trades, period)
+            trade_rows, _ = await self._build_trade_rows(client, placed)
+            return performance.filter_trades_by_period(trade_rows, period)
         trades, _ = await self.load_live_trades(client, period=period)
         return trades[:limit]
 
