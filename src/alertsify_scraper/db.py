@@ -33,6 +33,14 @@ CREATE TABLE IF NOT EXISTS placed_trades (
   closed_at TEXT,
   PRIMARY KEY (alertsify_user_id, alertsify_position_id)
 );
+
+CREATE TABLE IF NOT EXISTS open_skips (
+  alertsify_user_id TEXT NOT NULL,
+  alertsify_position_id TEXT NOT NULL,
+  skip_reason TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (alertsify_user_id, alertsify_position_id)
+);
 """
 
 MIGRATION_LEGACY_COMPOSITE_SQL = """
@@ -203,6 +211,71 @@ def migrate_sync(settings: Settings) -> None:
         logger.info("libsql schema ensured at %s", settings.libsql_url)
     finally:
         conn.close()
+
+
+def has_open_skip_sync(
+    settings: Settings,
+    alertsify_user_id: str,
+    position_id: str,
+) -> bool:
+    conn = _connect(settings)
+    try:
+        row = conn.execute(
+            """
+            SELECT 1 FROM open_skips
+            WHERE alertsify_user_id = ? AND alertsify_position_id = ?
+            LIMIT 1
+            """,
+            (alertsify_user_id, position_id),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def record_open_skip_sync(
+    settings: Settings,
+    *,
+    alertsify_user_id: str,
+    alertsify_position_id: str,
+    skip_reason: str,
+) -> None:
+    created_at = datetime.now(tz=UTC).isoformat()
+    conn = _connect(settings)
+    try:
+        conn.execute(
+            """
+            INSERT INTO open_skips (
+              alertsify_user_id,
+              alertsify_position_id,
+              skip_reason,
+              created_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(alertsify_user_id, alertsify_position_id) DO NOTHING
+            """,
+            (alertsify_user_id, alertsify_position_id, skip_reason, created_at),
+        )
+        conn.commit()
+        logger.info(
+            "Recorded open skip user_id=%s alertsify_id=%s reason=%s",
+            alertsify_user_id,
+            alertsify_position_id,
+            skip_reason,
+        )
+    finally:
+        conn.close()
+
+
+def is_open_position_handled_sync(
+    settings: Settings,
+    alertsify_user_id: str,
+    position_id: str,
+) -> bool:
+    return has_open_placed_sync(
+        settings,
+        alertsify_user_id,
+        position_id,
+    ) or has_open_skip_sync(settings, alertsify_user_id, position_id)
 
 
 def has_open_placed_sync(

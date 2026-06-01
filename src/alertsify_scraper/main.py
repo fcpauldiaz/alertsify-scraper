@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from alertsify_scraper import alertsify, db, market_hours, ntfy, sizing, tradier
 from alertsify_scraper.db import OpenTrade
 from alertsify_scraper.config import Settings, TradingMode, TradierContext
+from alertsify_scraper.ntfy import SkipReason
 
 logger = logging.getLogger(__name__)
 
@@ -288,10 +289,69 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     trade.alertsify_position_id,
                 )
 
+        async def skip_open_position(
+            *,
+            reason: SkipReason,
+            option_symbol: str,
+            warn: str,
+            chain_premium: float | None = None,
+            drift: float | None = None,
+            premium_per_share: float | None = None,
+            capital_cap: int | None = None,
+            cost_per_contract: float | None = None,
+        ) -> None:
+            nonlocal skipped_drift
+            already_skipped = await _run_in_thread(
+                partial(db.has_open_skip_sync, settings, user_id, pos.id),
+            )
+            if already_skipped:
+                logger.debug(
+                    "Skip open already recorded user_id=%s alertsify_id=%s reason=%s",
+                    user_id,
+                    pos.id,
+                    reason,
+                )
+                skipped_drift += 1
+                return
+
+            logger.warning("%s", warn)
+            try:
+                await ntfy.notify_trade_skipped(
+                    client,
+                    settings,
+                    alertsify_user_id=user_id,
+                    position=pos,
+                    tradier_option_symbol=option_symbol,
+                    reason=reason,
+                    chain_premium=chain_premium,
+                    drift=drift,
+                    premium_per_share=premium_per_share,
+                    capital_cap=capital_cap,
+                    cost_per_contract=cost_per_contract,
+                    trading_mode=ctx.mode,
+                )
+            except Exception:
+                logger.exception(
+                    "ntfy failed on %s skip user_id=%s alertsify_id=%s",
+                    reason,
+                    user_id,
+                    pos.id,
+                )
+            await _run_in_thread(
+                partial(
+                    db.record_open_skip_sync,
+                    settings,
+                    alertsify_user_id=user_id,
+                    alertsify_position_id=pos.id,
+                    skip_reason=reason,
+                ),
+            )
+            skipped_drift += 1
+
         for pos in parsed.positions:
             try:
                 if await _run_in_thread(
-                    partial(db.has_open_placed_sync, settings, user_id, pos.id),
+                    partial(db.is_open_position_handled_sync, settings, user_id, pos.id),
                 ):
                     skipped_dup += 1
                     continue
@@ -307,67 +367,33 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
 
                 drift = sizing.premium_drift_from_alert(chain, option_symbol, pos)
                 chain_premium = sizing.chain_premium_per_share(chain, option_symbol)
-                skip_reason = sizing.drift_skip_reason(ctx.mode, drift)
-                if skip_reason == "drift_unavailable":
-                    skipped_drift += 1
-                    logger.warning(
-                        "Skip open: cannot compare chain premium to alert entry "
-                        "user_id=%s alertsify_id=%s option_symbol=%s entry_price=%s",
-                        user_id,
-                        pos.id,
-                        option_symbol,
-                        pos.entry_price,
+                drift_skip = sizing.drift_skip_reason(ctx.mode, drift)
+                if drift_skip == "drift_unavailable":
+                    await skip_open_position(
+                        reason="drift_unavailable",
+                        option_symbol=option_symbol,
+                        chain_premium=chain_premium,
+                        warn=(
+                            f"Skip open: cannot compare chain premium to alert entry "
+                            f"user_id={user_id} alertsify_id={pos.id} "
+                            f"option_symbol={option_symbol} entry_price={pos.entry_price}"
+                        ),
                     )
-                    try:
-                        await ntfy.notify_trade_skipped(
-                            client,
-                            settings,
-                            alertsify_user_id=user_id,
-                            position=pos,
-                            tradier_option_symbol=option_symbol,
-                            reason="drift_unavailable",
-                            chain_premium=chain_premium,
-                            trading_mode=ctx.mode,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "ntfy failed on drift_unavailable skip user_id=%s alertsify_id=%s",
-                            user_id,
-                            pos.id,
-                        )
                     continue
-                if skip_reason == "drift_exceeded":
-                    skipped_drift += 1
-                    logger.warning(
-                        "Skip open: chain premium drift exceeds %.2f "
-                        "user_id=%s alertsify_id=%s option_symbol=%s "
-                        "chain_premium=%s entry_price=%s drift=%s",
-                        sizing.MAX_ALERT_CHAIN_PREMIUM_DRIFT,
-                        user_id,
-                        pos.id,
-                        option_symbol,
-                        chain_premium,
-                        pos.entry_price,
-                        drift,
+                if drift_skip == "drift_exceeded":
+                    await skip_open_position(
+                        reason="drift_exceeded",
+                        option_symbol=option_symbol,
+                        chain_premium=chain_premium,
+                        drift=drift,
+                        warn=(
+                            f"Skip open: chain premium drift exceeds "
+                            f"{sizing.MAX_ALERT_CHAIN_PREMIUM_DRIFT:.2f} "
+                            f"user_id={user_id} alertsify_id={pos.id} "
+                            f"option_symbol={option_symbol} chain_premium={chain_premium} "
+                            f"entry_price={pos.entry_price} drift={drift}"
+                        ),
                     )
-                    try:
-                        await ntfy.notify_trade_skipped(
-                            client,
-                            settings,
-                            alertsify_user_id=user_id,
-                            position=pos,
-                            tradier_option_symbol=option_symbol,
-                            reason="drift_exceeded",
-                            chain_premium=chain_premium,
-                            drift=drift,
-                            trading_mode=ctx.mode,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "ntfy failed on drift_exceeded skip user_id=%s alertsify_id=%s",
-                            user_id,
-                            pos.id,
-                        )
                     continue
 
                 quantity, premium, capital_cap = sizing.resolve_open_quantity(
@@ -377,69 +403,35 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     pos,
                 )
                 if premium is None:
-                    logger.warning(
-                        "Skip open: no valid premium user_id=%s alertsify_id=%s "
-                        "option_symbol=%s alertsify_qty=%s",
-                        user_id,
-                        pos.id,
-                        option_symbol,
-                        pos.quantity,
+                    await skip_open_position(
+                        reason="no_premium",
+                        option_symbol=option_symbol,
+                        chain_premium=chain_premium,
+                        warn=(
+                            f"Skip open: no valid premium user_id={user_id} "
+                            f"alertsify_id={pos.id} option_symbol={option_symbol} "
+                            f"alertsify_qty={pos.quantity}"
+                        ),
                     )
-                    try:
-                        await ntfy.notify_trade_skipped(
-                            client,
-                            settings,
-                            alertsify_user_id=user_id,
-                            position=pos,
-                            tradier_option_symbol=option_symbol,
-                            reason="no_premium",
-                            chain_premium=chain_premium,
-                            trading_mode=ctx.mode,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "ntfy failed on no_premium skip user_id=%s alertsify_id=%s",
-                            user_id,
-                            pos.id,
-                        )
                     continue
                 if quantity < 1:
                     cost_per_contract = premium * sizing.OPTION_CONTRACT_MULTIPLIER
-                    logger.warning(
-                        "Skip open: order quantity below 1 "
-                        "user_id=%s alertsify_id=%s option_symbol=%s "
-                        "max_capital=%s premium=%s cost_per_contract=%s "
-                        "alertsify_qty=%s capital_cap=%s",
-                        user_id,
-                        pos.id,
-                        option_symbol,
-                        settings.trade_max_capital,
-                        premium,
-                        cost_per_contract,
-                        pos.quantity,
-                        capital_cap,
+                    await skip_open_position(
+                        reason="quantity_below_cap",
+                        option_symbol=option_symbol,
+                        chain_premium=chain_premium,
+                        drift=drift,
+                        premium_per_share=premium,
+                        capital_cap=capital_cap,
+                        cost_per_contract=cost_per_contract,
+                        warn=(
+                            f"Skip open: order quantity below 1 "
+                            f"user_id={user_id} alertsify_id={pos.id} "
+                            f"option_symbol={option_symbol} max_capital={settings.trade_max_capital} "
+                            f"premium={premium} cost_per_contract={cost_per_contract} "
+                            f"alertsify_qty={pos.quantity} capital_cap={capital_cap}"
+                        ),
                     )
-                    try:
-                        await ntfy.notify_trade_skipped(
-                            client,
-                            settings,
-                            alertsify_user_id=user_id,
-                            position=pos,
-                            tradier_option_symbol=option_symbol,
-                            reason="quantity_below_cap",
-                            chain_premium=chain_premium,
-                            drift=drift,
-                            premium_per_share=premium,
-                            capital_cap=capital_cap,
-                            cost_per_contract=cost_per_contract,
-                            trading_mode=ctx.mode,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "ntfy failed on quantity_below_cap skip user_id=%s alertsify_id=%s",
-                            user_id,
-                            pos.id,
-                        )
                     continue
                 logger.info(
                     "Sized order qty=%s (alertsify_qty=%s capital_cap=%s) "
