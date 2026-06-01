@@ -14,7 +14,8 @@ STATUS_OPEN = "open"
 STATUS_CLOSED = "closed"
 LIVE_MODE: TradingMode = "live"
 
-SCHEMA_SQL = """
+SCHEMA_STATEMENTS = [
+    """
 CREATE TABLE IF NOT EXISTS placed_trades (
   alertsify_user_id TEXT NOT NULL DEFAULT '',
   alertsify_position_id TEXT NOT NULL,
@@ -32,18 +33,21 @@ CREATE TABLE IF NOT EXISTS placed_trades (
   created_at TEXT NOT NULL,
   closed_at TEXT,
   PRIMARY KEY (alertsify_user_id, alertsify_position_id)
-);
-
+)
+""",
+    """
 CREATE TABLE IF NOT EXISTS open_skips (
   alertsify_user_id TEXT NOT NULL,
   alertsify_position_id TEXT NOT NULL,
   skip_reason TEXT NOT NULL,
   created_at TEXT NOT NULL,
   PRIMARY KEY (alertsify_user_id, alertsify_position_id)
-);
-"""
+)
+""",
+]
 
-MIGRATION_LEGACY_COMPOSITE_SQL = """
+MIGRATION_LEGACY_COMPOSITE_STATEMENTS = [
+    """
 CREATE TABLE placed_trades_new (
   alertsify_user_id TEXT NOT NULL DEFAULT '',
   alertsify_position_id TEXT NOT NULL,
@@ -53,8 +57,9 @@ CREATE TABLE placed_trades_new (
   quantity INTEGER NOT NULL,
   created_at TEXT NOT NULL,
   PRIMARY KEY (alertsify_user_id, alertsify_position_id)
-);
-
+)
+""",
+    """
 INSERT INTO placed_trades_new (
   alertsify_user_id,
   alertsify_position_id,
@@ -72,12 +77,11 @@ SELECT
   tradier_order_id,
   quantity,
   created_at
-FROM placed_trades;
-
-DROP TABLE placed_trades;
-
-ALTER TABLE placed_trades_new RENAME TO placed_trades;
-"""
+FROM placed_trades
+""",
+    "DROP TABLE placed_trades",
+    "ALTER TABLE placed_trades_new RENAME TO placed_trades",
+]
 
 MIGRATION_ADD_STATUS_COLUMNS = [
     "ALTER TABLE placed_trades ADD COLUMN underlying TEXT NOT NULL DEFAULT ''",
@@ -144,6 +148,12 @@ def _table_columns(conn, table: str) -> set[str]:
     return {row[1] for row in rows}
 
 
+def _execute_each(conn, statements: list[str]) -> None:
+    for stmt in statements:
+        conn.execute(stmt)
+    conn.commit()
+
+
 def _row_to_placed_trade(row: tuple) -> PlacedTrade:
     return PlacedTrade(
         alertsify_user_id=row[0],
@@ -188,13 +198,11 @@ FROM placed_trades
 def migrate_sync(settings: Settings) -> None:
     conn = _connect(settings)
     try:
-        conn.execute(SCHEMA_SQL)
-        conn.commit()
+        _execute_each(conn, SCHEMA_STATEMENTS)
         columns = _table_columns(conn, "placed_trades")
         if "alertsify_user_id" not in columns:
             logger.info("Migrating placed_trades to composite primary key")
-            conn.executescript(MIGRATION_LEGACY_COMPOSITE_SQL)
-            conn.commit()
+            _execute_each(conn, MIGRATION_LEGACY_COMPOSITE_STATEMENTS)
             columns = _table_columns(conn, "placed_trades")
         for stmt in MIGRATION_ADD_STATUS_COLUMNS:
             col = stmt.split("ADD COLUMN ")[1].split()[0]
