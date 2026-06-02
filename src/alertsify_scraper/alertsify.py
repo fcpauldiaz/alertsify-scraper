@@ -90,7 +90,7 @@ async def fetch_option_positions(
     if not parsed.success:
         msg = f"Alertsify reported success=false for user_id={user_id}"
         raise ValueError(msg)
-    logger.info(
+    logger.debug(
         "Alertsify user_id=%s returned %d position(s) (total=%s)",
         user_id,
         len(parsed.positions),

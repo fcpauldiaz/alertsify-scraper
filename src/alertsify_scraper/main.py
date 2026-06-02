@@ -525,7 +525,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     pos.id,
                 )
 
-    logger.info(
+    logger.debug(
         "Poll cycle finished users=%d user_fetch_errors=%d positions=%d "
         "placed=%d closed=%d skipped_dup=%d skipped_drift=%d errors=%d",
         len(settings.alertsify_user_ids),
