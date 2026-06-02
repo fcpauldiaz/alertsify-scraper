@@ -39,19 +39,38 @@ Built assets are served from `dashboard/web/dist` at the same host as the API (d
 
 ### Run (Docker / Coolify)
 
-The Dockerfile builds the React UI and starts `alertsify-dashboard` on port **8080** with `DASHBOARD_HOST=0.0.0.0`.
+The image supports **two commands** (same env, especially `LIBSQL_URL`):
+
+| Command | Role | Logs to expect |
+| ------- | ---- | -------------- |
+| `alertsify-dashboard` (Dockerfile default) | API + UI on port 8080 | `uvicorn`, `GET /api/live/*` |
+| `alertsify-scraper` | Poll Alertsify → Tradier → Turso | `Poll cycle started`, `Poll cycle finished ... placed=N` |
+
+**The dashboard does not poll Alertsify.** If you only deploy the default container, you will never see `Poll cycle finished` and no new trades are written to the database.
+
+Local (both processes):
 
 ```bash
-docker build -t alertsify-dashboard .
-docker run --rm -p 8080:8080 --env-file .env alertsify-dashboard
+docker compose up --build
+```
+
+Or manually:
+
+```bash
+docker build -t alertsify-scraper .
+docker run --rm -p 8080:8080 --env-file .env alertsify-scraper alertsify-dashboard
+docker run --rm --env-file .env alertsify-scraper alertsify-scraper
 ```
 
 In Coolify:
 
-1. Expose container port **8080** (matches `DASHBOARD_PORT`).
-2. Leave **Start Command** empty so the image runs `alertsify-dashboard`.
-3. Set `DASHBOARD_HOST=0.0.0.0` (already the Docker default).
-4. Verify: `GET /api/health` returns JSON before opening `/`.
+1. **Dashboard app** — expose port **8080**, start command `alertsify-dashboard` (or empty for image default).
+2. **Scraper app** (second service, same image + env) — start command `alertsify-scraper`, no public port; tail logs during market hours.
+3. Both must use the **same** `LIBSQL_URL` / Turso credentials.
+4. Verify dashboard: `GET /api/health` → `"service": "alertsify-dashboard"`.
+5. Verify scraper: logs show `Alertsify users: N total` then, between 09:30–16:00 US/Eastern, `Poll cycle finished`.
+
+Outside market hours (`POLL_MARKET_HOURS_ONLY=true`), the scraper logs `Outside market session ... sleeping` instead of poll cycles.
 
 If `/` returns 404 but `/api/health` works, rebuild the image — the UI was not included in the deploy.
 

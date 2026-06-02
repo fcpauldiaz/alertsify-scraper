@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from alertsify_scraper import db
 from alertsify_scraper.config import Settings
+from alertsify_scraper.log_config import configure_logging
 from alertsify_scraper.dashboard.routes import mount_static, router
 
 logger = logging.getLogger(__name__)
@@ -71,9 +72,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    configure_logging()
+    logger.info(
+        "Starting alertsify-dashboard (API/UI only). "
+        "Poll cycles and 'Poll cycle finished' logs require a separate "
+        "alertsify-scraper process with the same LIBSQL_* env."
     )
     settings = Settings()
     app = create_app(settings)

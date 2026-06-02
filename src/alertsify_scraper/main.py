@@ -13,6 +13,7 @@ import httpx
 from pydantic import ValidationError
 
 from alertsify_scraper import alertsify, db, market_hours, ntfy, sizing, tradier
+from alertsify_scraper.log_config import configure_logging
 from alertsify_scraper.db import OpenTrade
 from alertsify_scraper.config import Settings, TradingMode, TradierContext
 from alertsify_scraper.ntfy import SkipReason
@@ -20,16 +21,6 @@ from alertsify_scraper.ntfy import SkipReason
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-
-def configure_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-    )
-    for noisy_logger in ("httpx", "httpcore"):
-        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
 
 _TRADE_LOG = ">>> TRADE"

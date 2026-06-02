@@ -177,6 +177,9 @@ async def fetch_account_gainloss(
     return _normalize_list_payload(closed)
 
 
+_ORDER_NOT_ACCESSIBLE = frozenset({401, 404})
+
+
 async def fetch_order(
     client: httpx.AsyncClient,
     ctx: TradierContext,
@@ -186,6 +189,13 @@ async def fetch_order(
         f"{_orders_url(ctx)}/{order_id}",
         headers=_tradier_headers(ctx),
     )
+    if response.status_code in _ORDER_NOT_ACCESSIBLE:
+        logger.debug(
+            "Tradier order id=%s not accessible for account (HTTP %s)",
+            order_id,
+            response.status_code,
+        )
+        return {}
     response.raise_for_status()
     payload = response.json()
     order = payload.get("order")
@@ -239,6 +249,13 @@ async def fetch_orders_by_id(
     async def fetch_one(order_id: str) -> tuple[str, dict[str, Any]]:
         try:
             order = await fetch_order(client, ctx, order_id)
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "Failed fetching Tradier order id=%s: HTTP %s",
+                order_id,
+                exc.response.status_code,
+            )
+            return order_id, {}
         except httpx.HTTPError:
             logger.warning("Failed fetching Tradier order id=%s", order_id)
             return order_id, {}

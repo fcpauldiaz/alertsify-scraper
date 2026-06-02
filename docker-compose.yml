@@ -1,0 +1,19 @@
+# Two processes share one image and .env (especially LIBSQL_URL).
+# Dashboard: http://localhost:8080
+# Scraper: no port; watch logs for "Poll cycle finished".
+
+services:
+  dashboard:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    command: ["alertsify-dashboard"]
+
+  scraper:
+    build: .
+    env_file:
+      - .env
+    command: ["alertsify-scraper"]
+    restart: unless-stopped

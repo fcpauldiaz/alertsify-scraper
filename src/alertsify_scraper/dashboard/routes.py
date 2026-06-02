@@ -42,7 +42,12 @@ async def health(
 ) -> dict[str, bool | str]:
     return {
         "status": "ok",
+        "service": "alertsify-dashboard",
         "live_tradier_configured": service.live_configured(),
+        "scraper_note": (
+            "Trade placement runs in a separate alertsify-scraper process; "
+            "this service only reads placed_trades and enriches from Tradier."
+        ),
     }
 
 
