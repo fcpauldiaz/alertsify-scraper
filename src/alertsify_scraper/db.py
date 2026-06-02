@@ -379,6 +379,25 @@ def list_live_trades_sync(
         conn.close()
 
 
+def trade_counts_by_mode_sync(settings: Settings) -> dict[TradingMode, int]:
+    conn = _connect(settings)
+    try:
+        rows = conn.execute(
+            """
+            SELECT trading_mode, COUNT(*) AS n
+            FROM placed_trades
+            GROUP BY trading_mode
+            """,
+        ).fetchall()
+        counts: dict[TradingMode, int] = {"paper": 0, "live": 0}
+        for mode, count in rows:
+            if mode in counts:
+                counts[mode] = int(count)
+        return counts
+    finally:
+        conn.close()
+
+
 def live_trade_summary_sync(settings: Settings) -> LiveTradeSummary:
     conn = _connect(settings)
     try:

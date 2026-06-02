@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from functools import partial
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from alertsify_scraper import db
 from alertsify_scraper.dashboard.serializers import (
     equity_point_to_dict,
     summary_to_dict,
@@ -36,18 +39,43 @@ PeriodQuery = Annotated[
 ]
 
 
+def _libsql_storage_kind(url: str) -> str:
+    if url.startswith("file:"):
+        return "file"
+    if url.startswith("libsql:"):
+        return "remote"
+    return "other"
+
+
 @router.get("/health")
 async def health(
+    request: Request,
     service: DashboardService = Depends(get_service),
-) -> dict[str, bool | str]:
+) -> dict[str, Any]:
+    settings = request.app.state.settings
+    counts, summary = await asyncio.gather(
+        asyncio.to_thread(partial(db.trade_counts_by_mode_sync, settings)),
+        asyncio.to_thread(partial(db.live_trade_summary_sync, settings)),
+    )
+    live_in_db = counts.get("live", 0)
+    paper_in_db = counts.get("paper", 0)
     return {
         "status": "ok",
         "service": "alertsify-dashboard",
         "live_tradier_configured": service.live_configured(),
+        "libsql_storage": _libsql_storage_kind(settings.libsql_url),
+        "placed_trades_live": live_in_db,
+        "placed_trades_paper": paper_in_db,
+        "open_live_trades": summary.open_count,
         "scraper_note": (
-            "Trade placement runs in a separate alertsify-scraper process; "
-            "this service only reads placed_trades and enriches from Tradier."
+            "Scraper writes placed_trades; this API reads only trading_mode=live. "
+            "Docker default CMD runs both via alertsify-run-all."
         ),
+        "process_checks": [
+            "Use alertsify-run-all (image default) or keep scraper + dashboard on one LIBSQL_URL.",
+            "With file: URLs in Docker, use file:/var/lib/alertsify/db.sqlite and a volume.",
+            "Configure ALERTSIFY_USER_ID_LIVE for rows the dashboard can show.",
+        ],
     }
 
 

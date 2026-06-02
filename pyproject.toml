@@ -23,6 +23,7 @@ dev = ["pytest>=8", "pytest-asyncio>=0.24"]
 [project.scripts]
 alertsify-scraper = "alertsify_scraper.main:main"
 alertsify-dashboard = "alertsify_scraper.dashboard.app:main"
+alertsify-run-all = "alertsify_scraper.run_all:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

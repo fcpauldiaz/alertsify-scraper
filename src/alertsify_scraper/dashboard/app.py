@@ -74,9 +74,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 def main() -> None:
     configure_logging()
     logger.info(
-        "Starting alertsify-dashboard (API/UI only). "
-        "Poll cycles and 'Poll cycle finished' logs require a separate "
-        "alertsify-scraper process with the same LIBSQL_* env."
+        "Starting alertsify-dashboard (API/UI). "
+        "Polling runs in the same container when started via alertsify-run-all "
+        "(Docker default); otherwise start alertsify-scraper separately."
     )
     settings = Settings()
     app = create_app(settings)

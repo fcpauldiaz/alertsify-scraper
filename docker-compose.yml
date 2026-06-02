@@ -1,19 +1,39 @@
-# Two processes share one image and .env (especially LIBSQL_URL).
+# Default image CMD runs scraper + dashboard in one container.
 # Dashboard: http://localhost:8080
-# Scraper: no port; watch logs for "Poll cycle finished".
+# Logs: Poll cycle finished (scraper) and GET /api/live/* (dashboard)
 
 services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - alertsify-data:/var/lib/alertsify
+
+  # Optional: run dashboard or scraper alone (profile: split)
   dashboard:
+    profiles: ["split"]
     build: .
     ports:
       - "8080:8080"
     env_file:
       - .env
     command: ["alertsify-dashboard"]
+    volumes:
+      - alertsify-data:/var/lib/alertsify
 
   scraper:
+    profiles: ["split"]
     build: .
     env_file:
       - .env
     command: ["alertsify-scraper"]
     restart: unless-stopped
+    volumes:
+      - alertsify-data:/var/lib/alertsify
+
+volumes:
+  alertsify-data:

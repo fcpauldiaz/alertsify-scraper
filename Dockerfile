@@ -1,6 +1,7 @@
 # Build: docker build -t alertsify-scraper .
-# Run dashboard (default): docker run --rm -p 8080:8080 --env-file .env alertsify-scraper
-# Run scraper: docker run --rm --env-file .env alertsify-scraper alertsify-scraper
+# Run (default): scraper + dashboard on :8080
+#   docker run --rm -p 8080:8080 --env-file .env alertsify-scraper
+# Override: alertsify-dashboard | alertsify-scraper
 
 FROM node:22-bookworm-slim AS dashboard-ui
 
@@ -40,4 +41,4 @@ USER app
 
 EXPOSE 8080
 
-CMD ["alertsify-dashboard"]
+CMD ["alertsify-run-all"]

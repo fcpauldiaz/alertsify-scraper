@@ -14,13 +14,19 @@ A separate web UI shows **live trading only** (paper trades are excluded). It re
 
 ### Run (development)
 
-Terminal 1 — API:
+Both processes (matches Docker):
+
+```bash
+alertsify-run-all
+```
+
+Or split terminals — API:
 
 ```bash
 alertsify-dashboard
 ```
 
-Terminal 2 — UI with hot reload:
+UI with hot reload:
 
 ```bash
 cd dashboard/web && npm run dev
@@ -32,43 +38,56 @@ Open http://127.0.0.1:5173.
 
 ```bash
 cd dashboard/web && npm run build
-alertsify-dashboard
+alertsify-run-all
 ```
 
 Built assets are served from `dashboard/web/dist` at the same host as the API (default http://127.0.0.1:8080).
 
+### Scraper ↔ dashboard process contract
+
+The two processes **do not talk over HTTP**. They only share **libSQL/Turso** (`placed_trades`):
+
+| Scraper | Dashboard |
+| ------- | --------- |
+| Polls Alertsify, places on Tradier | Reads `placed_trades` where `trading_mode = 'live'` |
+| `INSERT` with each user’s mode (`paper` or `live`) | Enriches those rows from **live** Tradier only |
+
+Common “scraper works, dashboard empty” cases:
+
+1. **Wrong file DB path in Docker** — use Turso (`libsql://...`) or `file:/var/lib/alertsify/db.sqlite` with the compose volume (not `file:./local.db` inside the container).
+2. **Paper-only scraper** — trades are stored as `trading_mode=paper`; the UI only shows **live** rows. Add users under `ALERTSIFY_USER_ID_LIVE`.
+3. **Dashboard-only override** — if you start `alertsify-dashboard` alone, polling does not run.
+
+Check coupling: `GET /api/health` returns `placed_trades_live`, `placed_trades_paper`, and `libsql_storage` (`file` vs `remote`).
+
 ### Run (Docker / Coolify)
 
-The image supports **two commands** (same env, especially `LIBSQL_URL`):
+**Default (one container):** `alertsify-run-all` runs the scraper subprocess and dashboard on port **8080**. Same process shares one `LIBSQL_URL` (no split-database issue).
 
-| Command | Role | Logs to expect |
-| ------- | ---- | -------------- |
-| `alertsify-dashboard` (Dockerfile default) | API + UI on port 8080 | `uvicorn`, `GET /api/live/*` |
-| `alertsify-scraper` | Poll Alertsify → Tradier → Turso | `Poll cycle started`, `Poll cycle finished ... placed=N` |
+| Command | When to use |
+| ------- | ----------- |
+| `alertsify-run-all` (Dockerfile default) | Production / Coolify — scraper + UI |
+| `alertsify-dashboard` | UI/API only |
+| `alertsify-scraper` | Polling only |
 
-**The dashboard does not poll Alertsify.** If you only deploy the default container, you will never see `Poll cycle finished` and no new trades are written to the database.
-
-Local (both processes):
+Local:
 
 ```bash
 docker compose up --build
 ```
 
-Or manually:
+Or:
 
 ```bash
 docker build -t alertsify-scraper .
-docker run --rm -p 8080:8080 --env-file .env alertsify-scraper alertsify-dashboard
-docker run --rm --env-file .env alertsify-scraper alertsify-scraper
+docker run --rm -p 8080:8080 --env-file .env alertsify-scraper
 ```
 
-In Coolify:
+Coolify: deploy the image with port **8080** and leave the start command empty (uses `alertsify-run-all`). Set env vars as in `.env.example`.
 
-1. **Dashboard app** — expose port **8080**, start command `alertsify-dashboard` (or empty for image default).
-2. **Scraper app** (second service, same image + env) — start command `alertsify-scraper`, no public port; tail logs during market hours.
-3. Both must use the **same** `LIBSQL_URL` / Turso credentials.
-4. Verify dashboard: `GET /api/health` → `"service": "alertsify-dashboard"`.
-5. Verify scraper: logs show `Alertsify users: N total` then, between 09:30–16:00 US/Eastern, `Poll cycle finished`.
+Split into two containers (optional): `docker compose --profile split up`.
+
+Verify: logs include `Poll cycle finished` (market hours) and `GET /api/live/*`; `GET /api/health` shows `placed_trades_live` / `placed_trades_paper`.
 
 Outside market hours (`POLL_MARKET_HOURS_ONLY=true`), the scraper logs `Outside market session ... sleeping` instead of poll cycles.
 
