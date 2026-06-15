@@ -13,6 +13,7 @@ import httpx
 from pydantic import ValidationError
 
 from alertsify_scraper import alertsify, db, market_hours, ntfy, sizing, tradier
+from alertsify_scraper.http_client import create_http_client
 from alertsify_scraper.log_config import configure_logging
 from alertsify_scraper.db import OpenTrade
 from alertsify_scraper.config import Settings, TradingMode, TradierContext
@@ -576,8 +577,7 @@ async def async_main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
 
-    timeout = httpx.Timeout(60.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with create_http_client(settings) as client:
         while not stop.is_set():
             if settings.poll_market_hours_only:
                 now = datetime.now(ZoneInfo(settings.market_timezone))

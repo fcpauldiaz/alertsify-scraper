@@ -303,6 +303,39 @@ async def notify_trade_skipped(
     )
 
 
+async def notify_http_unauthorized(
+    client: httpx.AsyncClient,
+    settings: Settings,
+    *,
+    source: str,
+    method: str,
+    url: str,
+) -> None:
+    title = f"401 Unauthorized | {source}"
+    body = "\n\n".join(
+        [
+            "An API request returned **401 Unauthorized**.",
+            _markdown_section(
+                "Request",
+                [
+                    f"Source: **{source}**",
+                    f"Method: `{method}`",
+                    f"URL: `{url}`",
+                ],
+            ),
+            "Check Alertsify cookie/session or Tradier API keys.",
+        ],
+    )
+    await _post_notification(
+        client,
+        settings,
+        title=title,
+        body=body,
+        tags=["warning", "closed_lock_with_key"],
+        priority="urgent",
+    )
+
+
 async def notify_trade_closing(
     client: httpx.AsyncClient,
     settings: Settings,

@@ -7,13 +7,13 @@ from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
 
-import httpx
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from alertsify_scraper import db
 from alertsify_scraper.config import Settings
+from alertsify_scraper.http_client import create_http_client
 from alertsify_scraper.log_config import configure_logging
 from alertsify_scraper.dashboard.routes import mount_static, router
 
@@ -42,8 +42,7 @@ def resolve_dashboard_dist() -> Path:
 async def lifespan(app: FastAPI):
     settings: Settings = app.state.settings
     await asyncio.to_thread(partial(db.migrate_sync, settings))
-    timeout = httpx.Timeout(60.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with create_http_client(settings) as client:
         app.state.http_client = client
         yield
 
