@@ -291,6 +291,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
             premium_per_share: float | None = None,
             capital_cap: int | None = None,
             cost_per_contract: float | None = None,
+            min_qty: int | None = None,
         ) -> None:
             nonlocal skipped_drift
             already_skipped = await _run_in_thread(
@@ -320,6 +321,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     premium_per_share=premium_per_share,
                     capital_cap=capital_cap,
                     cost_per_contract=cost_per_contract,
+                    min_qty=min_qty,
                     trading_mode=ctx.mode,
                 )
             except Exception:
@@ -388,7 +390,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                     )
                     continue
 
-                quantity, premium, capital_cap = sizing.resolve_open_quantity(
+                quantity, premium, capital_cap, min_qty = sizing.resolve_open_quantity(
                     settings,
                     chain,
                     option_symbol,
@@ -406,8 +408,28 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         ),
                     )
                     continue
+                cost_per_contract = premium * sizing.OPTION_CONTRACT_MULTIPLIER
+                if capital_cap < min_qty:
+                    await skip_open_position(
+                        reason="min_capital_unmet",
+                        option_symbol=option_symbol,
+                        chain_premium=chain_premium,
+                        drift=drift,
+                        premium_per_share=premium,
+                        capital_cap=capital_cap,
+                        cost_per_contract=cost_per_contract,
+                        min_qty=min_qty,
+                        warn=(
+                            f"Skip open: cannot reach min capital within max budget "
+                            f"user_id={user_id} alertsify_id={pos.id} "
+                            f"option_symbol={option_symbol} min_capital={settings.trade_min_capital} "
+                            f"max_capital={settings.trade_max_capital} premium={premium} "
+                            f"cost_per_contract={cost_per_contract} min_qty={min_qty} "
+                            f"capital_cap={capital_cap} alertsify_qty={pos.quantity}"
+                        ),
+                    )
+                    continue
                 if quantity < 1:
-                    cost_per_contract = premium * sizing.OPTION_CONTRACT_MULTIPLIER
                     await skip_open_position(
                         reason="quantity_below_cap",
                         option_symbol=option_symbol,
@@ -425,12 +447,25 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         ),
                     )
                     continue
+                if quantity > pos.quantity:
+                    logger.info(
+                        "Scaled order qty up for min capital qty=%s min_qty=%s "
+                        "alertsify_qty=%s min_capital=%s user_id=%s alertsify_id=%s",
+                        quantity,
+                        min_qty,
+                        pos.quantity,
+                        settings.trade_min_capital,
+                        user_id,
+                        pos.id,
+                    )
                 logger.info(
-                    "Sized order qty=%s (alertsify_qty=%s capital_cap=%s) "
-                    "max_capital=%s premium=%s user_id=%s alertsify_id=%s",
+                    "Sized order qty=%s (alertsify_qty=%s capital_cap=%s min_qty=%s) "
+                    "min_capital=%s max_capital=%s premium=%s user_id=%s alertsify_id=%s",
                     quantity,
                     pos.quantity,
                     capital_cap,
+                    min_qty,
+                    settings.trade_min_capital,
                     settings.trade_max_capital,
                     premium,
                     user_id,
@@ -458,6 +493,7 @@ async def run_poll_cycle(client: httpx.AsyncClient, settings: Settings) -> None:
                         premium_per_share=premium,
                         chain_premium=chain_premium,
                         drift=drift,
+                        min_qty=min_qty,
                         preview=preview,
                         trading_mode=ctx.mode,
                     )
