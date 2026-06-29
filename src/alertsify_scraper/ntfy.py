@@ -9,7 +9,7 @@ from alertsify_scraper.alertsify import OptionPosition
 from alertsify_scraper.config import Settings, TradingMode
 from alertsify_scraper.sizing import (
     MAX_ALERT_CHAIN_PREMIUM_DRIFT,
-    OPTION_CONTRACT_MULTIPLIER,
+    estimated_order_cost,
 )
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,7 @@ SkipReason = Literal[
     "drift_exceeded",
     "no_premium",
     "quantity_below_cap",
+    "min_capital_unmet",
 ]
 
 _SKIP_REASON_HEADLINE: dict[SkipReason, str] = {
@@ -29,6 +30,7 @@ _SKIP_REASON_HEADLINE: dict[SkipReason, str] = {
     ),
     "no_premium": "No valid premium on chain or Alertsify",
     "quantity_below_cap": "Order size below 1 contract after capital cap",
+    "min_capital_unmet": "Cannot reach minimum capital within max budget",
 }
 
 
@@ -73,10 +75,6 @@ def _fmt_user_short(user_id: str) -> str:
     if len(trimmed) <= 12:
         return trimmed
     return f"{trimmed[:8]}…{trimmed[-3:]}"
-
-
-def _estimated_order_cost(quantity: int, premium_per_share: float) -> float:
-    return quantity * premium_per_share * OPTION_CONTRACT_MULTIPLIER
 
 
 def _order_line(settings: Settings, quantity: int, premium_per_share: float) -> str:
@@ -142,6 +140,7 @@ async def notify_trade_placing(
     premium_per_share: float,
     chain_premium: float | None,
     drift: float | None,
+    min_qty: int,
     preview: bool,
     trading_mode: TradingMode,
 ) -> None:
@@ -153,7 +152,7 @@ async def notify_trade_placing(
         expiration_date=position.expiration_date,
         expiration_label=position.expiration_label,
     )
-    est_cost = _estimated_order_cost(order_quantity, premium_per_share)
+    est_cost = estimated_order_cost(order_quantity, premium_per_share)
 
     pricing_lines = [f"Alert entry: **{_fmt_price(position.entry_price)}**"]
     if chain_premium is not None:
@@ -163,19 +162,26 @@ async def notify_trade_placing(
     if position.current_price is not None and position.current_price > 0:
         pricing_lines.append(f"Alertsify mark: {_fmt_price(position.current_price)}")
 
+    order_lines = [
+        _order_line(settings, order_quantity, premium_per_share),
+        f"Alertsify qty **{position.quantity}** → order **{order_quantity}**",
+    ]
+    if order_quantity > position.quantity and min_qty > position.quantity:
+        order_lines.append(
+            f"Min capital {_fmt_price(settings.trade_min_capital)} → **{min_qty}** contracts"
+        )
+    order_lines.append(
+        f"Est. cost **~{_fmt_price(est_cost)}** "
+        f"(min {_fmt_price(settings.trade_min_capital)}, "
+        f"max {_fmt_price(settings.trade_max_capital)})"
+    )
+
     title = f"{mode} OPEN | {position.ticker} {position.option_type.upper()}"
     body = "\n\n".join(
         [
             contract,
             _markdown_section("Pricing", pricing_lines),
-            _markdown_section(
-                "Order",
-                [
-                    _order_line(settings, order_quantity, premium_per_share),
-                    f"Alertsify qty **{position.quantity}** → order **{order_quantity}**",
-                    f"Est. cost **~{_fmt_price(est_cost)}** (max capital {_fmt_price(settings.trade_max_capital)})",
-                ],
-            ),
+            _markdown_section("Order", order_lines),
             _markdown_section(
                 "Refs",
                 [
@@ -211,6 +217,8 @@ def _skip_detail_lines(
     capital_cap: int | None,
     cost_per_contract: float | None,
     max_capital: float,
+    min_capital: float,
+    min_qty: int | None,
 ) -> list[str]:
     lines = [f"Alert entry: **{_fmt_price(position.entry_price)}**"]
     if chain_premium is not None:
@@ -228,10 +236,13 @@ def _skip_detail_lines(
             lines.append(f"Alertsify mark: {_fmt_price(position.current_price)}")
         lines.append(f"Alertsify qty: **{position.quantity}**")
 
-    if reason == "quantity_below_cap" and premium_per_share is not None:
+    if reason in ("quantity_below_cap", "min_capital_unmet") and premium_per_share is not None:
         lines.append(f"Premium used: **{_fmt_price(premium_per_share)}**/share")
         lines.append(f"Cost/contract: **{_fmt_price(cost_per_contract)}**")
+        lines.append(f"Min capital: **{_fmt_price(min_capital)}**")
         lines.append(f"Max capital: **{_fmt_price(max_capital)}**")
+        if min_qty is not None:
+            lines.append(f"Min contracts needed: **{min_qty}**")
         lines.append(f"Capital cap: **{capital_cap or 0}** contracts")
         lines.append(f"Alertsify qty: **{position.quantity}**")
 
@@ -252,6 +263,7 @@ async def notify_trade_skipped(
     premium_per_share: float | None = None,
     capital_cap: int | None = None,
     cost_per_contract: float | None = None,
+    min_qty: int | None = None,
 ) -> None:
     contract = _fmt_contract(
         ticker=position.ticker,
@@ -280,6 +292,8 @@ async def notify_trade_skipped(
                     capital_cap=capital_cap,
                     cost_per_contract=cost_per_contract,
                     max_capital=settings.trade_max_capital,
+                    min_capital=settings.trade_min_capital,
+                    min_qty=min_qty,
                 ),
             ),
             _markdown_section(

@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     tradier_preview_only: bool = False
 
     trade_max_capital: float = Field(default=2000.0, ge=1.0)
+    trade_min_capital: float = Field(default=1000.0, ge=1.0)
 
     ntfy_base_url: str = Field(default="https://ntfy.sh")
     ntfy_topic: str = Field(..., min_length=1)
@@ -216,6 +217,9 @@ class Settings(BaseSettings):
             raise ValueError(msg)
         if self.tradier_order_type == "limit" and self.tradier_limit_price is None:
             msg = "TRADIER_LIMIT_PRICE is required when TRADIER_ORDER_TYPE=limit"
+            raise ValueError(msg)
+        if self.trade_min_capital > self.trade_max_capital:
+            msg = "TRADE_MIN_CAPITAL must be less than or equal to TRADE_MAX_CAPITAL"
             raise ValueError(msg)
 
         has_paper_users = any(m == "paper" for m in self.user_trading_modes.values())

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from alertsify_scraper.alertsify import OptionPosition
@@ -115,16 +116,33 @@ def contracts_from_capital(max_capital: float, premium_per_share: float) -> int:
     return int(max_capital // cost_per_contract)
 
 
+def contracts_for_min_capital(min_capital: float, premium_per_share: float) -> int:
+    if premium_per_share <= 0 or min_capital <= 0:
+        return 0
+    cost_per_contract = premium_per_share * OPTION_CONTRACT_MULTIPLIER
+    if cost_per_contract <= 0:
+        return 0
+    return math.ceil(min_capital / cost_per_contract)
+
+
+def estimated_order_cost(quantity: int, premium_per_share: float) -> float:
+    return quantity * premium_per_share * OPTION_CONTRACT_MULTIPLIER
+
+
 def resolve_open_quantity(
     settings: Settings,
     chain: list[dict[str, Any]],
     option_symbol: str,
     position: OptionPosition,
-) -> tuple[int, float | None, int]:
+) -> tuple[int, float | None, int, int]:
     premium = premium_per_share_for_open(settings, chain, option_symbol, position)
     if premium is None:
-        return 0, None, 0
+        return 0, None, 0, 0
     capital_cap = contracts_from_capital(settings.trade_max_capital, premium)
+    min_qty = contracts_for_min_capital(settings.trade_min_capital, premium)
     alertsify_qty = max(position.quantity, 0)
-    quantity = min(alertsify_qty, capital_cap) if alertsify_qty > 0 else 0
-    return quantity, premium, capital_cap
+    if alertsify_qty <= 0:
+        quantity = 0
+    else:
+        quantity = min(max(alertsify_qty, min_qty), capital_cap)
+    return quantity, premium, capital_cap, min_qty
