@@ -166,8 +166,6 @@ def mount_static(app, dist_dir: Path) -> None:
 
     app.mount("/assets", StaticFiles(directory=dist_dir / "assets"), name="assets")
 
-    @app.get("/{full_path:path}")
-    async def spa_fallback(full_path: str) -> HTMLResponse:
-        if full_path.startswith("api"):
-            raise HTTPException(status_code=404)
+    @app.get("/")
+    async def dashboard_index() -> HTMLResponse:
         return HTMLResponse(index_html)

@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from alertsify_scraper.config import Settings
 
@@ -55,6 +55,31 @@ class OptionPositionsResponse(BaseModel):
     positions: list[OptionPosition] = Field(default_factory=list)
     total: int | None = None
 
+    @classmethod
+    def from_api_payload(cls, payload: dict[str, Any]) -> OptionPositionsResponse:
+        raw_positions = payload.get("positions")
+        if not isinstance(raw_positions, list):
+            raw_positions = []
+
+        positions: list[OptionPosition] = []
+        for index, raw in enumerate(raw_positions):
+            try:
+                positions.append(OptionPosition.model_validate(raw))
+            except ValidationError as exc:
+                position_id = raw.get("id", "?") if isinstance(raw, dict) else "?"
+                logger.warning(
+                    "Skipping invalid Alertsify position index=%d id=%s: %s",
+                    index,
+                    position_id,
+                    exc.errors(include_url=False),
+                )
+
+        return cls(
+            success=bool(payload.get("success")),
+            positions=positions,
+            total=payload.get("total") if isinstance(payload.get("total"), int) else None,
+        )
+
 
 def _positions_url(settings: Settings) -> str:
     base = settings.alertsify_base_url.rstrip("/")
@@ -86,7 +111,7 @@ async def fetch_option_positions(
     )
     response.raise_for_status()
     payload: dict[str, Any] = response.json()
-    parsed = OptionPositionsResponse.model_validate(payload)
+    parsed = OptionPositionsResponse.from_api_payload(payload)
     if not parsed.success:
         msg = f"Alertsify reported success=false for user_id={user_id}"
         raise ValueError(msg)
