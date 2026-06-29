@@ -98,7 +98,11 @@ def premium_per_share_for_open(
         return settings.tradier_limit_price
 
     chain_row = find_chain_row(chain, option_symbol)
-    fallback = position.current_price if position.current_price > 0 else None
+    fallback = (
+        position.current_price
+        if position.current_price is not None and position.current_price > 0
+        else None
+    )
     return premium_per_share_from_chain(chain_row, fallback_price=fallback)
 
 

@@ -160,7 +160,7 @@ async def notify_trade_placing(
         pricing_lines.append(f"Chain: **{_fmt_price(chain_premium)}**")
     if drift is not None:
         pricing_lines.append(f"Drift: **{_fmt_price(drift)}**")
-    if position.current_price > 0:
+    if position.current_price is not None and position.current_price > 0:
         pricing_lines.append(f"Alertsify mark: {_fmt_price(position.current_price)}")
 
     title = f"{mode} OPEN | {position.ticker} {position.option_type.upper()}"
@@ -224,7 +224,7 @@ def _skip_detail_lines(
         lines.append(f"Max allowed: **{_fmt_price(MAX_ALERT_CHAIN_PREMIUM_DRIFT)}**")
 
     if reason == "no_premium":
-        if position.current_price > 0:
+        if position.current_price is not None and position.current_price > 0:
             lines.append(f"Alertsify mark: {_fmt_price(position.current_price)}")
         lines.append(f"Alertsify qty: **{position.quantity}**")
 

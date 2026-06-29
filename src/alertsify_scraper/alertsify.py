@@ -37,8 +37,8 @@ class OptionPosition(BaseModel):
     expiration_date: str = Field(alias="expirationDate")
     quantity: int
     entry_price: float = Field(alias="entryPrice")
-    current_price: float = Field(alias="currentPrice")
-    pnl: float
+    current_price: float | None = Field(default=None, alias="currentPrice")
+    pnl: float | None = None
     option_type: str = Field(alias="optionType")
     is_broadcast: bool = Field(alias="isBroadcast")
 

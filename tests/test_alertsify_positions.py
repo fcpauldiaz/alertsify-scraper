@@ -21,14 +21,37 @@ def _valid_position(**overrides: object) -> dict[str, object]:
     return base
 
 
-def test_from_api_payload_skips_invalid_positions() -> None:
+def test_from_api_payload_accepts_null_mark_and_pnl() -> None:
+    parsed = OptionPositionsResponse.from_api_payload(
+        {
+            "success": True,
+            "total": 1,
+            "positions": [
+                _valid_position(
+                    id="sim-ptsjrnsu",
+                    currentPrice=None,
+                    pnl=None,
+                    isBroadcast=False,
+                ),
+            ],
+        }
+    )
+
+    assert parsed.success is True
+    assert len(parsed.positions) == 1
+    assert parsed.positions[0].id == "sim-ptsjrnsu"
+    assert parsed.positions[0].current_price is None
+    assert parsed.positions[0].pnl is None
+
+
+def test_from_api_payload_skips_positions_missing_required_fields() -> None:
     parsed = OptionPositionsResponse.from_api_payload(
         {
             "success": True,
             "total": 2,
             "positions": [
                 _valid_position(id="pos-good"),
-                _valid_position(id="pos-bad", currentPrice=None, pnl=None),
+                {"id": "pos-bad"},
                 _valid_position(id="pos-good-2"),
             ],
         }
